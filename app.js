@@ -301,9 +301,11 @@ async function poll() {
   let s;
   try { s = await api(`/api/jobs/${jobId}`); } catch (e) { $("#jobError").textContent = e.message; return; }
   $("#jobState").textContent = s.state; $("#jobState").className = "chip " + (s.state === "done" ? "done" : s.state === "failed" ? "failed" : "running");
-  $("#jobMeta").textContent = `Input: ${s.input_type || "?"} · ` + (DEMO
+  const wh = ((cfg.tool_combinations || {}).fastq || {}).withheld;
+  $("#jobMeta").innerHTML = esc(`Input: ${s.input_type || "?"} · ` + (DEMO
     ? `precomputed result for ENA run ${(cfg.samples.find(x => x.id === s.id) || {}).run || s.id}`
-    : `results are deleted ${new Date(s.expires * 1000).toLocaleDateString()} · job ${s.id.slice(0, 8)}`);
+    : `results are deleted ${new Date(s.expires * 1000).toLocaleDateString()} · job ${s.id.slice(0, 8)}`))
+    + (wh ? `<br><span class="withheld-inline">${esc(wh)}</span>` : "");
   $("#jobError").textContent = s.error || "";
   $("#stepper").innerHTML = s.stages.map(st => `<li class="step ${st.key === selected ? "sel" : ""}" data-k="${st.key}" tabindex="0" role="button">
       <span class="chip ${st.status === "done" ? "done" : st.status === "failed" ? "failed" : st.status === "not_applicable" ? "na" : st.status}${st.status === "running" ? " spin" : ""}"
@@ -316,7 +318,7 @@ async function poll() {
   const lastDone = [...s.stages].reverse().find(x => x.status === "done");
   if (lastDone && (selected === null || selected === "_auto")) { selected = "_auto"; await showStage(lastDone.key, lastDone, true); }
   if (s.state === "queued" || s.state === "running") timer = setTimeout(poll, 3000);
-  else if (s.state === "done") { renderNotes(); if (selected === "_auto" || selected === null) showStage("report", s.stages[8]); }
+  else if (s.state === "done") { renderNotes(); if (selected === "_auto" || selected === null) showStage("report", s.stages.find(x => x.key === "report")); }
 }
 async function renderNotes() {
   try {
@@ -409,6 +411,7 @@ function toolPanel(inputType, brief) {
     <p>${esc(c.note)}</p>`}
     <ol class="chain">${c.stages.map(k => `<li><span class="t">${esc(STAGE_NAMES[k] || k)}</span><code>${esc(cfg.tools[k])}</code>
       <p>${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>
+    ${c.withheld ? `<p class="muted withheld"><b>Not listed:</b> ${esc(c.withheld)}</p>` : ""}
     ${other && !brief ? `<p class="muted">The other combination, <b>${esc(other.label)}</b>, is selected automatically
       when that kind of input is uploaded. ${esc(other.note)}</p>` : ""}`;
 }
@@ -436,7 +439,8 @@ function advancedPanel(inputType) {
     where the whole chain containing it has been run end to end on the test data; the rest are disabled and say why.
     <b>Nothing is silently substituted</b>: an untested selection stops the run with an explicit error, so a report can
     never name one tool and have been produced by another.</p>
-    <div class="advgrid">${rows}</div>`;
+    <div class="advgrid">${rows}</div>
+    ${c.withheld ? `<p class="muted withheld"><b>Not listed:</b> ${esc(c.withheld)}</p>` : ""}`;
 }
 
 const variantsLink = () => `<p><button class="ghost small" data-go="report">Open the full variant table in the report</button></p>`;

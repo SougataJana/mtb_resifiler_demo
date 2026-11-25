@@ -127,6 +127,8 @@ button.wide{width:100%}
 .combo small{display:block;color:var(--muted);font-size:12.5px;line-height:1.45}
 .combo:disabled{opacity:.5;transform:none}
 
+.withheld{margin-top:16px;padding:11px 14px;border-left:2px solid var(--border-strong);background:rgba(10,16,26,.35);border-radius:0 10px 10px 0}
+.withheld-inline{display:inline-block;margin-top:5px;color:var(--muted)}
 .modeswitch{margin:4px 0 16px}
 .advgrid{display:grid;gap:14px}
 .advrow{border-radius:12px;padding:13px 15px}
