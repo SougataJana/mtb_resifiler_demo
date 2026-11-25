@@ -391,7 +391,7 @@ const RENDER = {
 const STAGE_NAMES = {species: "Species and contamination check", qc: "Read QC", trim: "Trimming",
   align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)", markdup: "Duplicate marking",
   coverage: "Coverage", call_majority: "Calling: majority alleles", call_lowfreq: "Calling: low-frequency alleles",
-  call_largedel: "Calling: large deletions", annotate: "Annotation and numbering"};
+  call_largedel: "Calling: large deletions", calling: "Variant calling", annotate: "Annotation and numbering"};
 
 function toolPanel(inputType, brief) {
   const combs = cfg.tool_combinations;
