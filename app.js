@@ -14,7 +14,7 @@ const row = (k, v) => `<tr><td>${esc(k)}</td><td>${v === null || v === undefined
 const tile = (k, v, sub) => `<div class="stat sm"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="k">${esc(sub)}</div>` : ""}</div>`;
 const DEMO = !!window.RESIFILER_DEMO;
 const SAMPLE = "sample";
-let cfg = null, idx = null, chosen = null, advMode = false, JOB = null, jobs = [], pollT = null;
+let cfg = null, idx = null, chosen = null, advMode = false, selection = {}, JOB = null, jobs = [], pollT = null;
 const cache = {};
 
 // status always ships as glyph + words, never colour alone
@@ -75,7 +75,7 @@ const stageOf = async (key) => {
     ? "Running the pipeline needs the analysis server: alignment, calling and annotation run in containers, and this page is served as static files. It shows one stored sample output instead."
     : "The run takes several minutes; each step's output appears in its tab as the step finishes.";
   $("#sampleOut").disabled = !(idx && idx.sample);
-  document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { advMode = b.dataset.mode === "adv"; renderConfig(); });
+  document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { advMode = b.dataset.mode === "adv"; if (!advMode) selection = {}; renderConfig(); });
   renderConfig(); renderDash();
   const h = location.hash.match(/job=([A-Za-z0-9_-]+)/);
   if (h) openJob(h[1]);
@@ -84,7 +84,10 @@ const stageOf = async (key) => {
 // ------------------------------------------------------------------ 1. Pipeline Configuration
 const STAGE_NAMES = {species: "Species and contamination check", qc: "Read QC", trim: "Trimming",
   align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)", markdup: "Duplicate marking",
-  coverage: "Coverage", calling: "Variant calling", annotate: "Annotation and numbering"};
+  coverage: "Coverage", calling: "Variant calling", annotate: "Annotation and numbering",
+  mutation_db: "Mutation database", reference: "Reference genome", visualization: "Visualisation"};
+const TOOL_LABEL = {who_catalogue_v2: "WHO catalogue v2", h37rv_nc_000962_3: "H37Rv NC_000962.3", builtin_charts: "built-in charts"};
+const toolLabel = t => TOOL_LABEL[t] || t;
 const comboFor = t => (t || "").startsWith("fastq") ? "fastq" : t ? "fasta" : "fastq";
 
 function renderConfig() {
@@ -99,27 +102,44 @@ function renderConfig() {
       <small style="margin-top:6px">${ok ? (chosen ? "Matches your input · " : "Default · ") + x.stages.length + " stages, validated together" : "Not applicable to this input"}</small></button>`;
   }).join("");
   $("#chainWrap").innerHTML = !c ? "" : (advMode ? advancedPanel(c) : chainPanel(c));
-  setState("s1", c ? "Standard" : "waiting", c ? "good" : "");
-  if (c && advMode) setState("s1", "Advanced view", "info");
+  document.querySelectorAll("#chainWrap select[data-stage]").forEach(sel => sel.onchange = () => { selection[sel.dataset.stage] = sel.value; renderConfig(); });
+  const rs = $("#resetStd"); if (rs) rs.onclick = () => { selection = {}; renderConfig(); };
+  const bad = invalidSelections();
+  setState("s1", bad.length ? "Blocked: not validated" : (advMode ? "Advanced view" : c ? "Standard" : "waiting"), bad.length ? "warning" : (c ? (advMode ? "info" : "good") : ""));
+  updateRun();
 }
 function chainPanel(c) {
   return `<h3>What runs, and why each tool</h3><ol class="chain">${c.stages.map(k => `<li><span class="t">${esc(STAGE_NAMES[k] || k)}</span>
-    <code>${esc(cfg.tools[k])}</code><p>${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>`;
+    <code>${esc(toolLabel(cfg.tools[k]))}</code><p>${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>`;
 }
-// Advanced: every stage is a real menu, but only a tool whose whole chain has been run end to end is selectable;
-// the rest are disabled and say why, so a selection can never be quietly swapped for something else at run time.
+// Advanced: every stage is a real menu and every option is selectable. Only a tool whose whole chain has been run end
+// to end can actually run. Picking any other is allowed, but it is flagged, Start is blocked with the reason, and the
+// server refuses it too, so a report can never name one tool and have been produced by another.
+function chainStages() { const c = (cfg.tool_combinations || {})[comboFor(chosen && chosen.inputType)]; return c ? c.stages : []; }
+function invalidSelections() {
+  const alts = cfg.tool_alternatives || {}, out = [];
+  chainStages().forEach(k => {
+    const v = selection[k];
+    if (v && !(cfg.allowed_tools[k] || []).includes(v)) out.push({k, tool: v, why: ((alts[k] || []).find(a => a.tool === v) || {}).why || ""});
+  });
+  return out;
+}
 function advancedPanel(c) {
-  const alts = cfg.tool_alternatives || {}, allowed = cfg.allowed_tools || {}, lockedSt = cfg.locked_stages || [];
-  return `<p class="muted">Every stage is listed with the alternatives you might expect. A tool is selectable only where the whole chain containing it has
-    been run end to end on the test data; the rest are disabled and say why. <b>Nothing is silently substituted</b>: an untested selection stops the run
-    with an explicit error, so a report can never name one tool and have been produced by another.</p>
+  const alts = cfg.tool_alternatives || {}, allowed = cfg.allowed_tools || {}, lockedSt = cfg.locked_stages || [], bad = invalidSelections();
+  return `${bad.length ? `<div class="who guard" role="alert"><p>${chip("Not validated", "warning")} <b>${bad.length} selected tool${bad.length > 1 ? "s are" : " is"} not validated in this build</b>:
+      ${bad.map(x => esc(`${STAGE_NAMES[x.k] || x.k}: ${x.tool}`)).join("; ")}.</p>
+      <p class="muted">Start is blocked, because the run would not use the tool you picked and the report would say it did. Nothing is substituted silently.
+      <button class="small ghost" id="resetStd">Reset to Standard</button></p></div>` : ""}
+    <p class="muted">Every option is available. Only validated tools run in this build: a tool is validated when the whole chain containing it has been run end to end on the test data.
+    Any other choice is flagged and blocks the run until you switch back or that tool has been validated.</p>
     <div class="advgrid">${c.stages.map(k => {
-      const ok = allowed[k] || [cfg.tools[k]], locked = lockedSt.includes(k);
-      const opts = ok.map(t => `<option selected>${esc(t)}</option>`).join("") + (alts[k] || []).map(a => `<option disabled>${esc(a.tool)} — not in this build</option>`).join("");
-      return `<div class="advrow ${locked ? "locked" : ""}"><label><span class="k">${esc(STAGE_NAMES[k] || k)}${locked ? ` ${chip("fixed", "info")}` : ""}</span>
-        <select aria-label="${esc(STAGE_NAMES[k] || k)}" ${locked ? "disabled" : ""}>${opts}</select></label>
-        <p class="muted">${esc((cfg.tool_rationale || {})[k] || "")}</p>
-        ${(alts[k] || []).map(a => `<p class="alt"><b>${esc(a.tool)}</b> ${esc(a.why)}</p>`).join("")}</div>`;
+      const ok = allowed[k] || [cfg.tools[k]], locked = lockedSt.includes(k), cur = selection[k] || ok[0];
+      const alt = (alts[k] || []).find(a => a.tool === cur);
+      const opts = ok.map(t => `<option value="${esc(t)}" ${t === cur ? "selected" : ""}>${esc(toolLabel(t))}</option>`).join("")
+        + (alts[k] || []).map(a => `<option value="${esc(a.tool)}" ${a.tool === cur ? "selected" : ""}>${esc(a.tool)} \u2014 not validated</option>`).join("");
+      return `<div class="advrow ${locked ? "locked" : ""} ${alt ? "flag" : ""}"><label><span class="k">${esc(STAGE_NAMES[k] || k)}${locked ? ` ${chip("fixed", "info")}` : ""}${alt ? ` ${chip("not validated", "warning")}` : ""}</span>
+        <select data-stage="${esc(k)}" aria-label="${esc(STAGE_NAMES[k] || k)}" ${locked ? "disabled" : ""}>${opts}</select></label>
+        <p class="muted">${esc(alt ? alt.why : ((cfg.tool_rationale || {})[k] || ""))}</p></div>`;
     }).join("")}</div>`;
 }
 
@@ -174,11 +194,10 @@ async function handleFiles(list) {
       <p class="muted">Format, record structure, sequence alphabet and base composition were read from the first 256 KB, in this page. ${r.note ? esc(r.note) + " " : ""}The file was not uploaded anywhere.
       ${r.gc != null && r.gc >= 60 && r.gc <= 70 ? "A GC content near 65% is consistent with <i>M. tuberculosis</i>; the species check itself runs in the pipeline." : ""}</p>`;
     setState("s2", "validated", "good");
-    $("#runBtn").disabled = DEMO;
     renderConfig();
   } catch (e) {
     chosen = null; $("#inputReport").hidden = true; $("#formMsg").textContent = e.message;
-    setState("s2", "rejected", "critical"); $("#runBtn").disabled = true; renderConfig();
+    setState("s2", "rejected", "critical"); renderConfig();
   }
 }
 const fileInput = $("#files");
@@ -190,6 +209,7 @@ $("#runBtn").onclick = async () => {
   if (DEMO || !chosen) return;
   const fd = new FormData();
   [...fileInput.files].forEach(f => fd.append("files", f));
+  fd.append("tools", JSON.stringify(Object.fromEntries(chainStages().filter(k => !(cfg.locked_stages || []).includes(k)).map(k => [k, selection[k] || (cfg.allowed_tools[k] || [])[0]]))));
   $("#runBtn").disabled = true; $("#formMsg").textContent = "Uploading and validating…";
   try {
     const r = await api("/api/jobs", {method: "POST", body: fd});
@@ -204,6 +224,17 @@ $("#sampleOut").onclick = () => {
   openJob(SAMPLE);
   $("#s4").scrollIntoView({behavior: "smooth", block: "start"});
 };
+
+function updateRun() {
+  const bad = invalidSelections();
+  $("#runBtn").disabled = DEMO || !chosen || bad.length > 0;
+  $("#runBtn").title = bad.length ? "Blocked: a selected tool is not validated in this build" : "";
+  const n = $("#runNote");
+  if (bad.length) n.textContent = "Start is blocked: " + bad.map(x => `${STAGE_NAMES[x.k] || x.k} \u2192 ${x.tool}`).join("; ") + " is not validated in this build. Reset to Standard in step 1.";
+  else n.textContent = DEMO
+    ? "Running the pipeline needs the analysis server: alignment, calling and annotation run in containers, and this page is served as static files. It shows one stored sample output instead."
+    : "The run takes several minutes; each step's output appears in its tab as the step finishes.";
+}
 
 // ------------------------------------------------------------------ 3. Job Dashboard
 function renderDash() {

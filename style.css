@@ -260,3 +260,13 @@ select{font:inherit;color:var(--ink);background:rgba(10,16,26,.55);border:1px so
 td,th{overflow-wrap:break-word;word-break:normal;hyphens:none}
 table.grid td:nth-child(5){white-space:nowrap}      /* genomic change */
 .chip.neutral .g{color:var(--ink-2)}
+
+.advrow.flag{border-color:rgba(250,178,25,.55);box-shadow:inset 3px 0 0 var(--warning)}
+.guard{border-color:rgba(250,178,25,.55);margin:0 0 14px}
+.guard p{margin:4px 0}
+
+/* a grid track cannot shrink below its content's min-width unless told it may */
+.advgrid{grid-template-columns:minmax(0,1fr)}
+.advrow{min-width:0}
+.advrow select{width:100%;max-width:100%;flex:1 1 180px}
+.combos,.samples,.stats,.stepper{min-width:0}
