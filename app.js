@@ -83,53 +83,208 @@ const POINTS = {structure_view: "3D structure view", drug_distance: "Distance to
   reason: "Reason", domain: "Pfam domain"};
 const pt = k => POINTS[k] || k.replace(/_/g, " ");
 
-// ------------------------------------------------------------------ boot + upload
+// ------------------------------------------------------------------ boot + input
 async function api(path, opt) {
   if (DEMO && !opt) return demoApi(path);
   const r = await fetch(path, opt);
   if (!r.ok) { let d = ""; try { d = (await r.json()).detail; } catch (e) {} throw new Error(d || `HTTP ${r.status}`); }
   return r.json();
 }
+
+let chosen = null;        // {kind:"sample"|"file", id, inputType, label}
+let comboKey = null;
+
+const GLYPH = {critical: "▲", warning: "◆", serious: "■", good: "✓", info: "●"};
+function statusClass(s) {
+  s = String(s || "");
+  if (s === "Resistant") return "critical";
+  if (s.startsWith("Fail")) return "serious";
+  if (s.startsWith("Uncertain")) return "warning";
+  if (s.startsWith("No resistance")) return "good";
+  return "info";
+}
+// a status always ships as glyph + word, so colour never carries the meaning alone
+function statusChip(text) {
+  const c = statusClass(text);
+  return `<span class="chip ${c}"><span class="g" aria-hidden="true">${GLYPH[c]}</span>${esc(text)}</span>`;
+}
+function setState(step, text, cls) {
+  const e = $("#" + step + "state");
+  e.innerHTML = cls ? `<span class="g" aria-hidden="true">${GLYPH[cls] || ""}</span>${esc(text)}` : esc(text);
+  e.className = "chip " + (cls || "");
+}
+
 (async function boot() {
   cfg = await api("/api/config");
-  $("#banner").innerHTML = `<b>${esc(cfg.statement)}</b> Preset: ${esc(cfg.preset)}.`;
+  $("#banner").innerHTML = `<b>${esc(cfg.statement)}</b>`;
   $("#ref").textContent = cfg.reference;
-  if (DEMO) {
-    $("#upload").hidden = true;
-    $("#picker").hidden = false;
-    $("#pickerNote").textContent = cfg.built_from;
-    $("#samples").innerHTML = cfg.samples.map(s => `<li><button class="sample" data-id="${esc(s.id)}">
-        <b>${esc(s.run)}</b><small>${esc(s.why)}</small>
-        <small>${s.resistant.length ? "Resistant: " + s.resistant.map(esc).join(", ") : "No resistance-associated variant detected"}</small>
-        <small>${s.cards} evidence cards</small></button></li>`).join("");
-    document.querySelectorAll(".sample").forEach(b => b.onclick = () => openJob(b.dataset.id));
-  } else {
-    $("#limits").textContent = `Accepted: ${cfg.accepted.join("; ")}. Maximum ${cfg.max_upload_gb} GB per upload (placeholder limit).`;
-    $("#purge").textContent = cfg.purge_after_days;
-  }
+  $("#limits").textContent = DEMO
+    ? "FASTQ, FASTA or VCF. The file is checked in your browser and never uploaded from this page."
+    : `${cfg.accepted.join("; ")}. Maximum ${cfg.max_upload_gb} GB (placeholder limit).`;
+  $("#samples").innerHTML = (cfg.samples || []).map(s => `<li><button class="sample" data-id="${esc(s.id)}">
+      <b>${esc(s.run)}</b><small>${esc(s.why)}</small>
+      <small>${s.resistant.length ? "Resistant: " + s.resistant.map(esc).join(", ") : "No resistance-associated variant detected"}</small>
+      </button></li>`).join("");
+  document.querySelectorAll(".sample").forEach(b => b.onclick = () => pickSample(b.dataset.id));
+  renderCombos();
+  $("#runNote").textContent = DEMO
+    ? "Running the pipeline needs the analysis server (alignment, calling and annotation run in containers). This page is served as static files, so it shows a completed run instead."
+    : "The run takes several minutes; each stage appears as it finishes.";
   const h = location.hash.match(/job=([A-Za-z0-9_-]+)/);
-  if (h) openJob(h[1]);
+  if (h) { pickSample(h[1], true); openJob(h[1]); }
 })().catch(e => { $("#banner").textContent = "Could not load: " + e.message; });
 
-const fileInput = $("#files");
-function showChosen() {
-  const n = fileInput.files.length;
-  $("#dropText").textContent = n ? `${n} file${n > 1 ? "s" : ""} selected (${[...fileInput.files].map(f => (f.size / 1e6).toFixed(0) + " MB").join(", ")})` : "Choose files or drop them here";
-  $("#go").disabled = n < 1 || n > 2;
-  $("#formMsg").textContent = n > 2 ? "Upload one file, or two files for paired FASTQ." : "";
+// ---- sample isolates
+$("#useSample").onclick = () => {
+  const w = $("#samplesWrap");
+  w.hidden = !w.hidden;
+  if (!w.hidden) w.scrollIntoView({behavior: "smooth", block: "nearest"});
+};
+function pickSample(id, quiet) {
+  const s = (cfg.samples || []).find(x => x.id === id);
+  if (!s) return;
+  chosen = {kind: "sample", id, inputType: "fastq_paired", label: s.run};
+  $("#samplesWrap").hidden = false;
+  $("#inputReport").hidden = false;
+  $("#inputReport").innerHTML = `<h3>Input</h3><div class="stats">
+    <div class="stat"><div class="v">${esc(s.run)}</div><div class="k">ENA run</div></div>
+    <div class="stat"><div class="v">Illumina</div><div class="k">paired FASTQ</div></div>
+    <div class="stat"><div class="v">${s.cards}</div><div class="k">evidence cards</div></div></div>
+    <p class="muted">${esc(s.why)}. Public data; already taken through the pipeline.</p>`;
+  document.querySelectorAll(".sample").forEach(b => b.classList.toggle("sel", b.dataset.id === id));
+  setState("s1", "test isolate", "good");
+  $("#formMsg").textContent = "";
+  afterInput();
+  if (!quiet) $("#s2").scrollIntoView({behavior: "smooth", block: "start"});
 }
-fileInput.addEventListener("change", showChosen);
+
+// ---- real stage-1 inspection of an uploaded file, done in the browser
+const DNA = /^[ACGTNRYSWKMBDHVacgtnryswkmbdhv]+$/;
+async function readHead(file, bytes = 1 << 18) {
+  const buf = await file.slice(0, bytes).arrayBuffer();
+  const u8 = new Uint8Array(buf);
+  if (u8[0] !== 0x1f || u8[1] !== 0x8b) return new TextDecoder().decode(buf);
+  if (!("DecompressionStream" in window)) throw new Error("This browser cannot read .gz here. Try an uncompressed file.");
+  const rd = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  const dec = new TextDecoder();
+  let out = "";
+  try {                                   // the slice ends mid-member: keep whatever decoded first
+    for (;;) { const {done, value} = await rd.read(); if (done) break; out += dec.decode(value, {stream: true}); }
+  } catch (e) { /* expected on a truncated gzip slice */ }
+  return out;
+}
+function inspect(text, file) {
+  const lines = text.split("\n");
+  if (lines.length > 2) lines.pop();                       // last line is probably cut
+  const first = lines.find(l => l.trim());
+  if (!first) throw new Error("The file starts with no readable text.");
+  if (first.startsWith("##fileformat=VCF"))
+    return {type: "vcf", label: "VCF", rows: lines.filter(l => l && !l.startsWith("#")).length, note:
+      "Variant calling from a VCF is not built yet, so this input stops after validation."};
+  if (first.startsWith(">")) {
+    const seq = lines.filter(l => l && !l.startsWith(">"));
+    const bases = seq.join("");
+    const n = lines.filter(l => l.startsWith(">")).length;
+    if (bases && !DNA.test(bases.slice(0, 2000).replace(/\s/g, ""))) throw new Error("The sequence lines are not DNA.");
+    return {type: bases.length > 50000 ? "fasta_assembly" : "fasta_genes",
+            label: bases.length > 50000 ? "FASTA assembly" : "gene FASTA",
+            records: n, bases: bases.length, gc: gcOf(bases)};
+  }
+  if (first.startsWith("@")) {
+    const recs = [];
+    for (let i = 0; i + 3 < lines.length; i += 4)
+      if (lines[i].startsWith("@") && lines[i + 2].startsWith("+")) recs.push(lines[i + 1]);
+    if (!recs.length) throw new Error("This looks like FASTQ but no complete 4-line record was found.");
+    const joined = recs.join("");
+    if (!DNA.test(joined.slice(0, 2000))) throw new Error("The read sequences are not DNA.");
+    return {type: "fastq", label: "FASTQ reads", records: recs.length, bases: joined.length,
+            readLen: Math.round(joined.length / recs.length), gc: gcOf(joined)};
+  }
+  throw new Error("Unrecognised format: expected FASTQ, FASTA or VCF.");
+}
+const gcOf = s => s.length ? Math.round(1000 * (s.match(/[GCgc]/g) || []).length / s.length) / 10 : null;
+
+async function handleFiles(list) {
+  const files = [...list].slice(0, 2);
+  if (!files.length) return;
+  $("#formMsg").textContent = "";
+  setState("s1", "checking", "info");
+  $("#dropText").textContent = files.map(f => `${f.name} (${(f.size / 1e6).toFixed(0)} MB)`).join(", ");
+  try {
+    const r = inspect(await readHead(files[0]), files[0]);
+    const mb = files.reduce((a, f) => a + f.size, 0) / 1e6;
+    chosen = {kind: "file", id: null, label: r.label,
+              inputType: r.type === "fastq" ? (files.length > 1 ? "fastq_paired" : "fastq_single") : r.type};
+    $("#inputReport").hidden = false;
+    $("#inputReport").innerHTML = `<h3>Checked in your browser</h3><div class="stats">
+      <div class="stat"><div class="v">${esc(r.label)}</div><div class="k">format detected</div></div>
+      ${r.records !== undefined ? `<div class="stat"><div class="v">${r.records.toLocaleString()}</div><div class="k">${r.type === "fastq" ? "reads" : "sequences"} in sample</div></div>` : ""}
+      ${r.readLen ? `<div class="stat"><div class="v">${r.readLen} bp</div><div class="k">mean read length</div></div>` : ""}
+      ${r.gc !== null && r.gc !== undefined ? `<div class="stat"><div class="v">${r.gc}%</div><div class="k">GC content</div></div>` : ""}
+      <div class="stat"><div class="v">${mb.toFixed(0)} MB</div><div class="k">${files.length} file${files.length > 1 ? "s" : ""}</div></div></div>
+      <p class="muted">Format, record structure, sequence alphabet and base composition were read from the first
+      256 KB of the file, in this page. ${r.note ? esc(r.note) + " " : ""}The file was not uploaded anywhere.
+      ${r.gc !== null && r.gc !== undefined && r.gc >= 60 && r.gc <= 70 ? "A GC content near 65% is consistent with <i>M. tuberculosis</i>; the species check itself runs in the pipeline." : ""}</p>`;
+    setState("s1", "validated", "good");
+    afterInput();
+    $("#s2").scrollIntoView({behavior: "smooth", block: "start"});
+  } catch (e) {
+    chosen = null;
+    $("#inputReport").hidden = true;
+    $("#formMsg").textContent = e.message;
+    setState("s1", "rejected", "critical");
+    afterInput();
+  }
+}
+const fileInput = $("#files");
+fileInput.addEventListener("change", () => handleFiles(fileInput.files));
 ["dragover", "dragenter"].forEach(e => $("#drop").addEventListener(e, ev => { ev.preventDefault(); $("#drop").classList.add("over"); }));
 ["dragleave", "drop"].forEach(e => $("#drop").addEventListener(e, ev => { ev.preventDefault(); $("#drop").classList.remove("over"); }));
-$("#drop").addEventListener("drop", ev => { fileInput.files = ev.dataTransfer.files; showChosen(); });
-$("#form").addEventListener("submit", async ev => {
-  ev.preventDefault();
+$("#drop").addEventListener("drop", ev => handleFiles(ev.dataTransfer.files));
+
+// ---- step 2: the combination is chosen by what the input is
+function comboFor(inputType) { return (inputType || "").startsWith("fastq") ? "fastq" : "fasta"; }
+function renderCombos() {
+  const combs = cfg.tool_combinations || {};
+  const want = chosen ? comboFor(chosen.inputType) : null;
+  $("#chooserLead").innerHTML = "Tools are not picked one stage at a time. A combination is validated <b>as a whole</b> "
+    + "and was run end to end on the test data together, because a chain that looks reasonable at each step can still "
+    + "be wrong overall: a short-read aligner used on assembled contigs is a valid tool and a wrong choice. "
+    + (chosen ? "Your input selects the combination below." : "Provide a sequence above and the matching combination is selected.");
+  $("#combos").innerHTML = Object.entries(combs).map(([k, c]) => {
+    const ok = !chosen || k === want;
+    return `<button class="combo ${k === comboKey ? "sel" : ""}" data-combo="${esc(k)}" ${ok ? "" : "disabled"}>
+      <b>${esc(c.label)}</b><small>${esc(c.note)}</small>
+      <small style="margin-top:6px">${ok ? (chosen ? "Matches your input · " : "") + c.stages.length + " stages, validated together"
+        : "Not applicable to this input"}</small></button>`;
+  }).join("");
+  document.querySelectorAll("[data-combo]").forEach(b => b.onclick = () => { comboKey = b.dataset.combo; renderCombos(); });
+  $("#chainWrap").innerHTML = comboKey ? toolPanel(comboKey === "fastq" ? "fastq_paired" : "fasta_assembly") : "";
+  setState("s2", comboKey ? "selected" : "waiting", comboKey ? "good" : "");
+}
+function afterInput() {
+  comboKey = chosen ? comboFor(chosen.inputType) : null;
+  renderCombos();
+  const ready = !!(chosen && chosen.kind === "sample");
+  $("#sampleOut").disabled = !cfg.samples || !cfg.samples.length;
+  $("#runBtn").disabled = DEMO || !chosen;
+  setState("s3", ready ? "sample output ready" : (chosen ? "ready" : "waiting"), ready || chosen ? "info" : "");
+}
+$("#sampleOut").onclick = () => {
+  const id = (chosen && chosen.kind === "sample") ? chosen.id : (cfg.samples[0] || {}).id;
+  if (!id) return;
+  pickSample(id, true);
+  openJob(id);
+  $("#job").scrollIntoView({behavior: "smooth", block: "start"});
+};
+$("#runBtn").onclick = async () => {
+  if (DEMO || !chosen) return;
   const fd = new FormData();
   [...fileInput.files].forEach(f => fd.append("files", f));
-  $("#go").disabled = true; $("#formMsg").textContent = "Uploading and validating…";
+  $("#runBtn").disabled = true; $("#formMsg").textContent = "Uploading and validating…";
   try { const r = await api("/api/jobs", {method: "POST", body: fd}); $("#formMsg").textContent = ""; openJob(r.id); }
-  catch (e) { $("#formMsg").textContent = e.message; $("#go").disabled = false; }
-});
+  catch (e) { $("#formMsg").textContent = e.message; $("#runBtn").disabled = false; }
+};
 
 // ------------------------------------------------------------------ job + stepper
 function openJob(id) {
@@ -178,7 +333,7 @@ async function showStage(key, st, auto) {
 }
 
 // ------------------------------------------------------------------ stage renderers
-const chipFor = s => s === "Resistant" ? "R" : s.startsWith("Fail") ? "Fail" : s.startsWith("Uncertain") ? "U" : "";
+
 const RENDER = {
   validation: d => kv(d),
   qc: d => `<h3>Species check</h3><p>${esc(d.species.verdict)}</p>${kv(d.species, ["verdict", "method", "hits", "possible_contamination"])}
@@ -207,7 +362,7 @@ const RENDER = {
     <p class="muted">${esc(d.numbering)}</p>${variantsLink()}`,
   who: d => `<p>${esc(d.catalogue)} · ${esc(d.reference)}. <b>This is the resistance call.</b> ${esc(d.thresholds_status)}.</p>
     <div class="tbl-wrap"><table class="grid"><tr><th>Drug</th><th>WHO catalogue call</th><th>Resistance-associated variants</th><th>Uncertain-significance variants</th></tr>
-    ${Object.entries(d.drugs).map(([drug, v]) => `<tr><td>${esc(drug)}</td><td><span class="chip ${chipFor(v.status)}">${esc(v.status)}</span>${v.qualifier ? `<br><small>${esc(v.qualifier)}</small>` : ""}
+    ${Object.entries(d.drugs).map(([drug, v]) => `<tr><td>${esc(drug)}</td><td>${statusChip(v.status)}${v.qualifier ? `<br><small>${esc(v.qualifier)}</small>` : ""}
       ${v.failed_loci.length ? `<br><small>low coverage at ${v.failed_loci.map(esc).join(", ")}</small>` : ""}</td>
       <td>${v.resistance_variants.map(esc).join("<br>") || na}</td><td>${v.uncertain_variants.map(esc).join("<br>") || na}</td></tr>`).join("")}</table></div>`,
   explain: d => `<p>${esc(d.evidence_package)}. ${d.notes.map(esc).join(" ")}</p>
@@ -255,6 +410,65 @@ const variantsLink = () => `<p><button class="ghost small" data-go="report">Open
 function wireVariantsLink() { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => showStage(b.dataset.go)); }
 function wireWho() {}
 
+
+// ------------------------------------------------------------------ conservation chart
+// One measure (how many homologs carry each residue here) across 20 categories. Raw counts are the
+// headline; the weighted frequency is secondary. Two residues carry identity - the M. tuberculosis
+// one and the variant - so they get the first two categorical slots, in fixed order, plus a legend
+// and direct labels; every other residue is recessive ink, not a series.
+const AA20 = "ACDEFGHIKLMNPQRSTVWY".split("");
+const AA3 = {A: "Ala", C: "Cys", D: "Asp", E: "Glu", F: "Phe", G: "Gly", H: "His", I: "Ile", K: "Lys",
+  L: "Leu", M: "Met", N: "Asn", P: "Pro", Q: "Gln", R: "Arg", S: "Ser", T: "Thr", V: "Val", W: "Trp", Y: "Tyr"};
+
+function conservationChart(c, ref, alt) {
+  const counts = c.observed_counts, freqs = c.frequencies_with_pseudocount || {};
+  const n = c.n_homologs_with_residue;
+  const max = Math.max(1, ...AA20.map(a => counts[a] || 0));
+  const W = 580, H = 180, padL = 40, padB = 34, padT = 10, inner = W - padL - 8;
+  const bw = inner / 20, y = v => padT + (H - padT - padB) * (1 - v / max), base = H - padB;
+  const fill = a => a === ref ? "var(--series-1)" : a === alt ? "var(--series-2)" : "var(--chart-neutral)";
+  let bars = "", labels = "", hit = "";
+  AA20.forEach((a, i) => {
+    const v = counts[a] || 0, x = padL + i * bw + 1, w = bw - 2;     // 2px surface gap between bars
+    const top = v ? y(v) : base - 3, h = Math.max(base - top, 3), r = Math.min(4, w / 2, h);
+    bars += `<path d="M${x},${base} V${top + r} Q${x},${top} ${x + r},${top} H${x + w - r} Q${x + w},${top} ${x + w},${top + r} V${base} Z" fill="${fill(a)}"/>`;
+    const key = a === ref || a === alt;
+    labels += `<text x="${x + w / 2}" y="${base + 15}" text-anchor="middle" font-size="11" font-weight="${key ? 700 : 400}" fill="var(--text-2)">${a}</text>`;
+    if (key) labels += `<text x="${x + w / 2}" y="${base + 28}" text-anchor="middle" font-size="10" fill="var(--muted)">${a === ref ? "Mtb" : "variant"}</text>`;
+    // the count is labelled for both identified residues even at zero: "variant seen in 0 sequences" is the finding
+    if (key) labels += `<text x="${x + w / 2}" y="${top - 5}" text-anchor="middle" font-size="11" font-weight="650" fill="var(--text)">${v}</text>`;
+    hit += `<rect x="${padL + i * bw}" y="${padT}" width="${bw}" height="${base - padT}" fill="transparent"
+      data-aa="${a}" data-v="${v}" data-f="${freqs[a] !== undefined ? (freqs[a] * 100).toFixed(1) : ""}"/>`;
+  });
+  const grid = [0, max / 2, max].map(v => `<line x1="${padL}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"/>
+    <text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${Math.round(v)}</text>`).join("");
+  const table = AA20.map(a => `<tr><td>${AA3[a]} (${a})${a === ref ? " — M. tuberculosis" : a === alt ? " — variant" : ""}</td>
+    <td>${counts[a] || 0} of ${n}${freqs[a] !== undefined ? ` · ${(freqs[a] * 100).toFixed(1)}% weighted` : ""}</td></tr>`).join("");
+  return `<div class="legend">
+      <span><i class="sw" style="background:var(--series-1)"></i>M. tuberculosis residue (${esc(ref || "?")})</span>
+      <span><i class="sw" style="background:var(--series-2)"></i>variant residue (${esc(alt || "?")})</span>
+      <span><i class="sw" style="background:var(--chart-neutral)"></i>other residues</span></div>
+    <div class="chart" data-chart="cons"><svg viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="Number of homologous sequences carrying each amino acid at this position">${grid}${bars}${labels}${hit}</svg>
+      <div class="tip"></div></div>
+    <details><summary>Table view</summary><table>${table}</table></details>`;
+}
+function wireCharts(root) {
+  root.querySelectorAll('[data-chart="cons"]').forEach(w => {
+    const tip = w.querySelector(".tip");
+    w.querySelectorAll("[data-aa]").forEach(h => {
+      h.addEventListener("mousemove", ev => {
+        const b = w.getBoundingClientRect(), a = h.dataset.aa;
+        tip.innerHTML = `<b>${AA3[a]}</b> ${h.dataset.v} sequences${h.dataset.f ? ` · ${h.dataset.f}% weighted` : ""}`;
+        tip.style.display = "block";
+        tip.style.left = Math.max(0, Math.min(ev.clientX - b.left + 12, b.width - 190)) + "px";
+        tip.style.top = Math.max(0, ev.clientY - b.top - 38) + "px";
+      });
+      h.addEventListener("mouseleave", () => tip.style.display = "none");
+    });
+  });
+}
+
 // ------------------------------------------------------------------ evidence cards
 function whoBlock(w) {
   if (!w) return "";
@@ -269,10 +483,11 @@ function callBlock(c, note) {
     ${row("Allele fraction", c.allele_fraction === null ? na : esc(c.allele_fraction))}${row("Depth", c.depth === null ? na : esc(c.depth))}
     ${a ? row("Allele-fraction note", esc(a.note) + (a.warnings || []).map(w => `<br>${esc(w)}`).join("")) : ""}</table>`;
 }
-function missenseBody(e) {
+function missenseBody(e, card) {
+  const mm = /\b([A-Z])(\d+)([A-Z])\b/.exec((card && card.title) || "");
+  const ref = mm && mm[1], alt = mm && mm[3];
   const n = e.numbering, s = e.structure, d = e.drug_site, c = e.conservation, p = e.property_change, v = e.substitution_severity;
   const st = n.structure;
-  const tol = c ? Object.entries(c.observed_counts).filter(([, k]) => k > 0).sort((a, b) => b[1] - a[1]).map(([a, k]) => `${a}: ${k}`).join(", ") : "";
   return `<h3>Numbering</h3><table>${row("Mtb (WHO / H37Rv)", esc(n.mtb_label))}${row("UniProt", n.uniprot ? esc(n.uniprot.accession + " " + n.uniprot.pos) : null)}
     ${row("Structure residue", st ? esc(`${st.source} ${st.id}${st.chain ? " chain " + st.chain : ""}, residue ${st.auth_resnum ?? "-"}`) : null)}${n.ecoli ? row("E. coli", esc(n.ecoli.aa + n.ecoli.pos)) : ""}</table>
     <h3>Structure</h3><table>${row("Model", esc(s.source))}${row("Burial (relative SASA)", s.burial ? esc(`${s.burial} (${s.relative_solvent_accessibility})`) : null)}
@@ -280,16 +495,18 @@ function missenseBody(e) {
     ${s.catalytic_site ? row("Catalytic site", esc(s.catalytic_site.definition + ": " + (s.catalytic_site.is_catalytic_residue ? "this is a catalytic residue" : s.catalytic_site.distance_band))) : ""}
     ${s.low_confidence ? row("Confidence", "<b>low confidence (pLDDT &lt; 70): structural values are not used</b>") : ""}${s.note ? row("Note", esc(s.note)) : ""}</table>
     <h3>Drug site</h3>${d ? `<table>${row("Ligand", esc(d.ligand))}${row("Distance to ligand (band)", esc(d.ligand_distance_band))}${row("Pocket", esc((d.pocket || "") + (d.pocket ? (d.in_pocket ? ": inside" : ": outside") : "")))}</table>` : `<p>${esc(e.drug_site_note || "no drug-binding site defined for this gene")}</p>`}
-    <h3>Conservation</h3>${c ? `<table>${row("Counts (headline)", `<b>${esc(c.headline)}</b>`)}${row("Label", esc(c.label))}
-    ${row("Weighted frequency of Mtb residue (secondary)", c.ref_frequency_weighted !== null ? esc(`${c.ref_frequency_weighted} (95% interval ${c.ref_frequency_ci95.join("–")})`) : null)}
-    ${row("Residues observed here", esc(tol))}${e.alt_count ? row("Variant residue", esc(`${e.alt_count.aa} in ${e.alt_count.count} of ${e.alt_count.of}`)) : ""}
-    ${row("Gap fraction / percentile in protein", esc(`${c.gap_fraction} / ${c.percentile_within_protein}`))}${c.note ? row("Note", esc(c.note)) : ""}</table>` : na}
+    <h3>Conservation</h3>${c ? `<p class="synthesis">${esc(c.headline)} <span class="muted">(${esc(c.label)})</span></p>
+    ${c.observed_counts ? conservationChart(c, ref, alt) : ""}
+    <table>${row("Weighted frequency of the M. tuberculosis residue", c.ref_frequency_weighted !== null ? esc(`${c.ref_frequency_weighted} (95% interval ${c.ref_frequency_ci95.join("–")})`) : null)}
+    ${row("Gap in the alignment here", esc(`${(c.gap_fraction * 100).toFixed(0)}% of sequences`))}
+    ${row("Conservation percentile within the protein", esc(c.percentile_within_protein))}
+    ${row("Sequences compared", esc(`${c.n_homologs_with_residue} (${c.counting})`))}${c.note ? row("Note", esc(c.note)) : ""}</table>` : na}
     <h3>Substitution</h3><table>${p ? row("Property change", esc(`charge ${p.charge_change >= 0 ? "+" : ""}${p.charge_change}, volume ${p.volume_change >= 0 ? "+" : ""}${p.volume_change} Å3, hydrophobicity ${p.hydrophobicity_change >= 0 ? "+" : ""}${p.hydrophobicity_change}`)) : ""}
     ${v ? row("Severity", esc(`BLOSUM62 ${v.blosum62}, Grantham ${v.grantham} (${v.grantham_class}; ${v.grantham_bands})`)) : ""}</table>`;
 }
 function renderCard(c) {
   let body = "";
-  if (c.state === "missense") body = missenseBody(c.evidence);
+  if (c.state === "missense") body = missenseBody(c.evidence, c);
   else if (c.state === "truncation") {
     const t = c.truncation, l = c.lof_tolerance;
     body = `<table>${row("Protein length", t.protein_length)}${row("First residue lost / altered", t.first_residue_lost)}${row("% protein lost", t.percent_protein_lost)}
@@ -315,6 +532,7 @@ function renderCard(c) {
     ${callBlock(c.call, c.call_note)}<p class="disc">${esc(c.disclaimer || "")}</p></div></details>`;
 }
 function wireCards(root) {
+  wireCharts(root);
   root.querySelectorAll("[data-mol]").forEach(b => b.onclick = () => openMol(b));
   root.querySelectorAll("[data-explain]").forEach(b => b.onclick = () => explainInto(b, JSON.parse(b.dataset.explain)));
 }
@@ -344,8 +562,14 @@ async function explainInto(btn, q, tries = 0) {
 // ------------------------------------------------------------------ report: drugs + variants table
 let vScope = "priority", vQ = "", vOff = 0;
 function wireReport(d) {
-  $("#rdrugs").innerHTML = `<div class="tbl-wrap"><table class="grid"><tr><th>Drug</th><th>WHO call</th><th>Resistance-associated</th><th>Uncertain</th><th>Failed loci</th></tr>
-    ${d.drug_calls.map(v => `<tr><td>${esc(v.drug)}</td><td><span class="chip ${chipFor(v.who_call)}">${esc(v.who_call)}</span></td><td>${v.resistance_variants.map(esc).join("<br>") || na}</td>
+  const n = k => d.drug_calls.filter(x => statusClass(x.who_call) === k).length;
+  $("#rdrugs").innerHTML = `<div class="stats">
+    <div class="stat"><div class="v">${n("critical")}</div><div class="k">drugs with a resistance-associated variant</div></div>
+    <div class="stat"><div class="v">${n("warning")}</div><div class="k">uncertain significance</div></div>
+    <div class="stat"><div class="v">${n("serious")}</div><div class="k">Fail, low coverage</div></div>
+    <div class="stat"><div class="v">${n("good")}</div><div class="k">none detected</div></div></div>
+    <div class="tbl-wrap"><table class="grid"><tr><th>Drug</th><th>WHO call</th><th>Resistance-associated</th><th>Uncertain</th><th>Failed loci</th></tr>
+    ${d.drug_calls.map(v => `<tr><td>${esc(v.drug)}</td><td>${statusChip(v.who_call)}</td><td>${v.resistance_variants.map(esc).join("<br>") || na}</td>
     <td>${v.uncertain_variants.map(esc).join("<br>") || na}</td><td>${v.failed_loci.map(esc).join(", ") || na}</td></tr>`).join("")}</table></div>`;
   $("#rvars").innerHTML = `<div class="tools"><input type="search" id="vq" placeholder="Filter by gene / variant / effect">
     <button class="ghost small" id="vscope"></button><span class="muted" id="vcount"></span></div><div class="tbl-wrap"><table class="grid" id="vtbl"></table></div>
