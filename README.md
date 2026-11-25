@@ -16,15 +16,16 @@ pipeline. For each isolate you can step through what every stage produced:
 
 | Stage | Tool |
 |---|---|
-| 1 Upload and validation | standard library |
+| 1 Upload and validation | in-browser format check |
 | 2 QC and species / contamination check | fastp, Mash screen |
 | 3 Trimming | fastp |
 | 4 Alignment and coverage | BWA-MEM, samtools markdup, mosdepth |
-| 5 Variant calling | ResiFiler integrated calling (method withheld, see below) |
+| 5 Variant calling | MTB-ResiFiler's own orchestrated caller (fixed, not selectable; method unpublished) |
 | 6 Annotation and numbering | SnpEff, checked against the WHO catalogue's genomic coordinates |
 | 7 WHO catalogue v2 lookup per drug | loss-of-function and deletion rules; low coverage reports Fail, never susceptible |
-| 8 Explainability | structure, drug-binding distance, conservation, loss-of-function tolerance |
-| 9 Report | JSON and TSV download |
+| 8 Report | JSON and TSV download |
+
+**MIC prediction (machine learning) is in development** and is not part of this run.
 
 **The resistance call always comes from the WHO catalogue v2. The evidence layer is additive and
 never changes the call.**
@@ -49,20 +50,17 @@ any deviation is printed at the top of the report. One preset (`Standard`) ships
 Expected genotypes come from the CRyPTIC consortium (release_june2022) and are used only as an
 external reference, never for tuning.
 
-## What is withheld
+## The variant caller
 
-The variant-calling step is shown as a single integrated component and **no variant caller is named**.
-The orchestration is unpublished work. Everything else is shown as the pipeline produced it: each
-variant still carries its call class (majority, sub-clonal, or depth-confirmed), because that is what
-the evidence layer uses to report a possible mixed population, and the WHO catalogue call is unchanged.
+Variant calling is MTB-ResiFiler's exclusive orchestrated caller. It is shown as a fixed step with its
+output (what was called, and the class of each call) but is not selectable and its method is not
+described, because it is unpublished work.
 
 ## What this page does not do
 
 * It does not run the pipeline. Uploading a sequence and watching it run is demonstrated live at
   the poster; this page shows stored results.
-* On-demand evidence for variants outside the WHO catalogue genes needs the evidence service and is
-  not available here.
-* No machine-learning predictor and no MIC prediction are included. Both are planned work.
+* No machine-learning predictor and no MIC prediction are included; both are in development.
 * No patient data. Every isolate is a public ENA run; no sequence reads are published here.
 
 ## Reproducibility

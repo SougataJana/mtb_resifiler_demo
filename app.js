@@ -308,7 +308,10 @@ async function poll() {
       <span class="chip ${st.status === "done" ? "done" : st.status === "failed" ? "failed" : st.status === "not_applicable" ? "na" : st.status}${st.status === "running" ? " spin" : ""}"
         aria-label="${st.status}">${ICON[st.status]} ${st.status.replace("_", " ")}</span>
       <span class="t">${esc(st.title)}${st.reason ? `<small>${esc(st.reason)}</small>` : ""}</span></li>`).join("");
-  document.querySelectorAll(".step").forEach(el => {
+  $("#stepper").insertAdjacentHTML("beforeend", `<li class="step ml" aria-disabled="true">
+      <span class="chip warning"><span class="g" aria-hidden="true">${GLYPH.warning}</span>in development</span>
+      <span class="t">MIC prediction (machine learning)<small>Not part of this run. Our machine-learning framework is still in development.</small></span></li>`);
+  document.querySelectorAll(".step:not(.ml)").forEach(el => {
     const go = () => showStage(el.dataset.k, s.stages.find(x => x.key === el.dataset.k));
     el.onclick = go; el.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
   });
@@ -417,12 +420,12 @@ function advancedPanel(inputType) {
   if (!c) return "";
   const alts = cfg.tool_alternatives || {}, allowed = cfg.allowed_tools || {};
   const rows = c.stages.map(k => {
-    const inUse = cfg.tools[k], ok = allowed[k] || [inUse];
+    const inUse = cfg.tools[k], ok = allowed[k] || [inUse], locked = (cfg.locked_stages || []).includes(k);
     const opts = ok.map(t => `<option selected>${esc(t)}</option>`).join("")
       + (alts[k] || []).map(a => `<option disabled>${esc(a.tool)} — not in this build</option>`).join("");
-    return `<div class="advrow">
-      <label><span class="k">${esc(STAGE_NAMES[k] || k)}</span>
-        <select aria-label="${esc(STAGE_NAMES[k] || k)}">${opts}</select></label>
+    return `<div class="advrow ${locked ? "locked" : ""}">
+      <label><span class="k">${esc(STAGE_NAMES[k] || k)}${locked ? ` <span class="chip info"><span class="g" aria-hidden="true">${GLYPH.info}</span>fixed</span>` : ""}</span>
+        <select aria-label="${esc(STAGE_NAMES[k] || k)}" ${locked ? "disabled" : ""}>${opts}</select></label>
       <p class="muted">${esc((cfg.tool_rationale || {})[k] || "")}</p>
       ${(alts[k] || []).map(a => `<p class="alt"><b>${esc(a.tool)}</b> ${esc(a.why)}</p>`).join("")}
     </div>`;

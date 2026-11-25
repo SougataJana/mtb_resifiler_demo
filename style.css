@@ -236,3 +236,7 @@ button.tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--a
 .names{display:flex;flex-wrap:wrap;gap:6px}
 .names code{background:rgba(10,16,26,.55);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:12px}
 td.xrow{padding:0;border:0}
+
+.step.ml{cursor:default;opacity:.85;border-style:dashed}
+.step.ml:hover{transform:none;border-color:var(--border)}
+.advrow.locked select{opacity:.75;cursor:not-allowed}
