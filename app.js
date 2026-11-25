@@ -48,8 +48,6 @@ async function demoApi(path) {
     if (q) rows = rows.filter(r => `${r.gene} ${r.variant} ${r.effect} ${r.type}`.toLowerCase().includes(q));
     return {total: rows.length, offset: off, rows: rows.slice(off, off + lim)};
   }
-  if (rest === "/explain")
-    throw new Error("On-demand evidence is built by the evidence service, which this static page has no access to. The live pipeline at the poster can build it.");
   throw new Error("not available in the static demo");
 }
 function demoDownload(kind) {
@@ -62,8 +60,7 @@ function demoDownload(kind) {
         d.uncertain_variants.join(";"), d.failed_loci.join(";")].join("\t"))].join("\n");
   else {
     const cols = ["pos", "ref", "alt", "type", "gene", "variant", "effect", "callers", "call_class",
-                  "allele_fraction", "depth", "who_entry", "who_drug_grading", "who_rule",
-                  "evidence_state", "evidence_tier", "evidence_points"];
+                  "allele_fraction", "depth", "who_entry", "who_drug_grading", "who_rule"];
     text = [cols.join("\t"), ...s.variants.map(r => cols.map(c => r[c] ?? "").join("\t"))].join("\n");
   }
   name = `resifiler_${s.id}_${kind}`;
@@ -150,7 +147,7 @@ function pickSample(id, quiet) {
   $("#inputReport").innerHTML = `<h3>Input</h3><div class="stats">
     <div class="stat"><div class="v">${esc(s.run)}</div><div class="k">ENA run</div></div>
     <div class="stat"><div class="v">Illumina</div><div class="k">paired FASTQ</div></div>
-    <div class="stat"><div class="v">${s.cards}</div><div class="k">evidence cards</div></div></div>
+    <div class="stat"><div class="v">${s.resistant.length}</div><div class="k">drugs with a resistance-associated variant</div></div></div>
     <p class="muted">${esc(s.why)}. Public data; already taken through the pipeline.</p>`;
   document.querySelectorAll(".sample").forEach(b => b.classList.toggle("sel", b.dataset.id === id));
   setState("s1", "test isolate", "good");
@@ -335,7 +332,7 @@ async function showStage(key, st, auto) {
   try {
     const d = await api(`/api/jobs/${jobId}/stages/${key}`);
     p.innerHTML = `<h2>${esc(st ? st.title : key)}</h2>` + RENDER[key](d);
-    if (key === "who") wireWho(); if (key === "explain") wireCards(p); if (key === "report") wireReport(d);
+    if (key === "who") wireWho(); if (key === "report") wireReport(d);
     if (["calling", "annotation"].includes(key)) wireVariantsLink();
   } catch (e) { p.innerHTML = `<p class="msg">${esc(e.message)}</p>`; }
 }
@@ -373,7 +370,6 @@ const RENDER = {
     ${Object.entries(d.drugs).map(([drug, v]) => `<tr><td>${esc(drug)}</td><td>${statusChip(v.status)}${v.qualifier ? `<br><small>${esc(v.qualifier)}</small>` : ""}
       ${v.failed_loci.length ? `<br><small>low coverage at ${v.failed_loci.map(esc).join(", ")}</small>` : ""}</td>
       <td>${v.resistance_variants.map(esc).join("<br>") || na}</td><td>${v.uncertain_variants.map(esc).join("<br>") || na}</td></tr>`).join("")}</table></div>`,
-  explain: d => renderEvidence(d),
   report: d => `<p><b>${esc(d.title)}</b></p>${d.statement.map(s => `<p>${esc(s)}</p>`).join("")}
     <p>Reference: ${esc(d.reference)} · Catalogue: ${esc(d.catalogue)} · Preset: ${esc(d.preset)} · Poster freeze date: ${esc(d.poster_freeze_date)}</p>
     <div class="tools">${DEMO
@@ -444,234 +440,6 @@ function wireVariantsLink() { document.querySelectorAll("[data-go]").forEach(b =
 function wireWho() {}
 
 
-// ------------------------------------------------------------------ conservation chart
-// One measure (how many homologs carry each residue here) across 20 categories. Raw counts are the
-// headline; the weighted frequency is secondary. Two residues carry identity - the M. tuberculosis
-// one and the variant - so they get the first two categorical slots, in fixed order, plus a legend
-// and direct labels; every other residue is recessive ink, not a series.
-const AA20 = "ACDEFGHIKLMNPQRSTVWY".split("");
-const AA3 = {A: "Ala", C: "Cys", D: "Asp", E: "Glu", F: "Phe", G: "Gly", H: "His", I: "Ile", K: "Lys",
-  L: "Leu", M: "Met", N: "Asn", P: "Pro", Q: "Gln", R: "Arg", S: "Ser", T: "Thr", V: "Val", W: "Trp", Y: "Tyr"};
-
-function conservationChart(c, ref, alt) {
-  const counts = c.observed_counts, freqs = c.frequencies_with_pseudocount || {};
-  const n = c.n_homologs_with_residue;
-  const max = Math.max(1, ...AA20.map(a => counts[a] || 0));
-  const W = 580, H = 180, padL = 40, padB = 34, padT = 10, inner = W - padL - 8;
-  const bw = inner / 20, y = v => padT + (H - padT - padB) * (1 - v / max), base = H - padB;
-  const fill = a => a === ref ? "var(--series-1)" : a === alt ? "var(--series-2)" : "var(--chart-neutral)";
-  let bars = "", labels = "", hit = "";
-  AA20.forEach((a, i) => {
-    const v = counts[a] || 0, x = padL + i * bw + 1, w = bw - 2;     // 2px surface gap between bars
-    const top = v ? y(v) : base - 3, h = Math.max(base - top, 3), r = Math.min(4, w / 2, h);
-    bars += `<path d="M${x},${base} V${top + r} Q${x},${top} ${x + r},${top} H${x + w - r} Q${x + w},${top} ${x + w},${top + r} V${base} Z" fill="${fill(a)}"/>`;
-    const key = a === ref || a === alt;
-    labels += `<text x="${x + w / 2}" y="${base + 15}" text-anchor="middle" font-size="11" font-weight="${key ? 700 : 400}" fill="var(--text-2)">${a}</text>`;
-    if (key) labels += `<text x="${x + w / 2}" y="${base + 28}" text-anchor="middle" font-size="10" fill="var(--muted)">${a === ref ? "Mtb" : "variant"}</text>`;
-    // the count is labelled for both identified residues even at zero: "variant seen in 0 sequences" is the finding
-    if (key) labels += `<text x="${x + w / 2}" y="${top - 5}" text-anchor="middle" font-size="11" font-weight="650" fill="var(--text)">${v}</text>`;
-    hit += `<rect x="${padL + i * bw}" y="${padT}" width="${bw}" height="${base - padT}" fill="transparent"
-      data-aa="${a}" data-v="${v}" data-f="${freqs[a] !== undefined ? (freqs[a] * 100).toFixed(1) : ""}"/>`;
-  });
-  const grid = [0, max / 2, max].map(v => `<line x1="${padL}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${Math.round(v)}</text>`).join("");
-  const table = AA20.map(a => `<tr><td>${AA3[a]} (${a})${a === ref ? " — M. tuberculosis" : a === alt ? " — variant" : ""}</td>
-    <td>${counts[a] || 0} of ${n}${freqs[a] !== undefined ? ` · ${(freqs[a] * 100).toFixed(1)}% weighted` : ""}</td></tr>`).join("");
-  return `<div class="legend">
-      <span><i class="sw" style="background:var(--series-1)"></i>M. tuberculosis residue (${esc(ref || "?")})</span>
-      <span><i class="sw" style="background:var(--series-2)"></i>variant residue (${esc(alt || "?")})</span>
-      <span><i class="sw" style="background:var(--chart-neutral)"></i>other residues</span></div>
-    <div class="chart" data-chart="cons"><svg viewBox="0 0 ${W} ${H}" role="img"
-      aria-label="Number of homologous sequences carrying each amino acid at this position">${grid}${bars}${labels}${hit}</svg>
-      <div class="tip"></div></div>
-    <details><summary>Table view</summary><table>${table}</table></details>`;
-}
-function wireCharts(root) {
-  root.querySelectorAll('[data-chart="cons"]').forEach(w => {
-    const tip = w.querySelector(".tip");
-    w.querySelectorAll("[data-aa]").forEach(h => {
-      h.addEventListener("mousemove", ev => {
-        const b = w.getBoundingClientRect(), a = h.dataset.aa;
-        tip.innerHTML = `<b>${AA3[a]}</b> ${h.dataset.v} sequences${h.dataset.f ? ` · ${h.dataset.f}% weighted` : ""}`;
-        tip.style.display = "block";
-        tip.style.left = Math.max(0, Math.min(ev.clientX - b.left + 12, b.width - 190)) + "px";
-        tip.style.top = Math.max(0, ev.clientY - b.top - 38) + "px";
-      });
-      h.addEventListener("mouseleave", () => tip.style.display = "none");
-    });
-  });
-}
-
-// ------------------------------------------------------------------ evidence cards
-// ------------------------------------------------------------------ evidence: ranked, grouped, tabbed
-// The WHO grade decides the order and the colour. Grades 1-2 are "associated with resistance", 3 is
-// uncertain, 4-5 are "not associated"; every chip carries a glyph and the words, never colour alone.
-const gradeNo = g => { const m = /^(\d)\)/.exec(g || ""); return m ? +m[1] : null; };
-const GRADE_CLASS = g => { const n = gradeNo(g); return n === 1 || n === 2 ? "critical" : n === 3 ? "warning" : n ? "good" : "info"; };
-function whoChips(w) {
-  if (!w) return "";
-  if (!w.listed) return `<span class="chip info"><span class="g" aria-hidden="true">${GLYPH.info}</span>not in the catalogue</span>`;
-  const by = {};
-  (w.rows || []).forEach(r => (by[r.grading] = by[r.grading] || []).push(r));      // one chip per shared grade
-  return Object.entries(by).map(([g, rs]) => { const c = GRADE_CLASS(g);
-    return `<span class="chip ${c}"><span class="g" aria-hidden="true">${GLYPH[c]}</span>${rs.map(r => esc(r.drug)).join(", ")} · ${esc(rs[0].label || g)}</span>`; }).join(" ");
-}
-const rankOf = c => {                         // lower = shown first
-  const ns = ((c.who_catalogue || {}).rows || []).map(r => gradeNo(r.grading)).filter(Boolean);
-  return ns.length ? Math.min(...ns) - 1 : 5;
-};
-const tile = (k, v, sub) => `<div class="stat sm"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="k">${esc(sub)}</div>` : ""}</div>`;
-
-function tabs(id, list) {
-  return `<div class="tabs" role="tablist">${list.map((t, i) => `<button class="tab" role="tab" data-tab="${id}-${i}"
-      aria-selected="${i === 0}">${esc(t.label)}</button>`).join("")}</div>
-    ${list.map((t, i) => `<div class="tabpanel" role="tabpanel" data-panel="${id}-${i}" ${i ? "hidden" : ""}>${t.html}</div>`).join("")}`;
-}
-let tabSeq = 0;
-
-function callBlock(c, note) {
-  if (!c) return note ? `<p class="muted">${esc(note)}</p>` : "";
-  const a = c.allele_fraction_note, cl = c.callers || [];
-  return `<h3>Call</h3><table>${row(cl.length > 1 ? "Callers" : "Calling", esc(cl.join(" + ")))}${row("Call class", esc(c.call_class))}
-    ${row("Allele fraction", c.allele_fraction === null ? na : esc(c.allele_fraction))}${row("Depth", c.depth === null ? na : esc(c.depth))}
-    ${a ? row("Allele-fraction note", esc(a.note) + (a.warnings || []).map(w => `<br>${esc(w)}`).join("")) : ""}</table>`;
-}
-const pointsBlock = c => `<h3>Evidence points shown (${(c.evidence_points || []).length})</h3>
-  <div class="pts">${(c.evidence_points || []).map(k => `<span class="chip">${esc(pt(k))}</span>`).join("")}</div>
-  <p class="disc">${esc(c.disclaimer || "")}</p>`;
-
-function missenseTabs(c) {
-  const e = c.evidence, n = e.numbering, s = e.structure, d = e.drug_site, cs = e.conservation, p = e.property_change, v = e.substitution_severity;
-  const mm = /\b([A-Z])(\d+)([A-Z])\b/.exec(c.title || ""), ref = mm && mm[1], alt = mm && mm[3], st = n.structure;
-  const low = s.low_confidence;
-  const glance = `<div class="stats">
-    ${tile("Where it sits", low ? "Low confidence" : cap(s.burial || "unknown"), low ? "pLDDT below 70, not used" : `RSA ${s.relative_solvent_accessibility ?? "n/a"} · ${s.secondary_structure || "n/a"}`)}
-    ${d ? tile("Drug site", d.ligand_distance_band, `${d.ligand}${d.pocket ? ` · ${d.pocket} ${d.in_pocket ? "inside" : "outside"}` : ""}`)
-        : tile("Drug site", "None defined", "no drug-binding site for this gene")}
-    ${cs ? tile("Conservation", `${cs.ref_count} / ${cs.n_homologs_with_residue}`, `${AA3[ref] || ref} here · ${/^not labelled/.test(cs.label) ? "sparse set, not labelled" : cs.label}`)
-         : tile("Conservation", "n/a", "no homolog set")}
-    ${v ? tile("Substitution", `Grantham ${v.grantham}`, `${v.grantham_class} · BLOSUM62 ${v.blosum62}`) : ""}</div>`;
-  const mol = st && st.source === "PDB"
-    ? `<p><button class="ghost small" data-mol='${esc(JSON.stringify(st))}'>View in 3D</button></p><div class="viewer-slot"></div>` : "";
-  return [
-    {label: "Overview", html: `${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${glance}`},
-    {label: "Structure", html: `${mol}<h3>Model and location</h3><table>${row("Model", esc(s.source))}${row("Domain", esc(e.domain))}
-      ${row("Burial (relative SASA)", s.burial ? esc(`${s.burial} (${s.relative_solvent_accessibility})`) : null)}${row("Secondary structure", esc(s.secondary_structure))}
-      ${s.catalytic_site ? row("Catalytic site", esc(s.catalytic_site.definition + ": " + (s.catalytic_site.is_catalytic_residue ? "this is a catalytic residue" : s.catalytic_site.distance_band))) : ""}
-      ${low ? row("Confidence", "<b>low confidence (pLDDT &lt; 70): structural values are not used</b>") : ""}${s.note ? row("Note", esc(s.note)) : ""}</table>
-      <h3>Drug site</h3>${d ? `<table>${row("Ligand", esc(d.ligand))}${row("Distance (band)", esc(d.ligand_distance_band))}${row("Pocket", esc((d.pocket || "") + (d.pocket ? (d.in_pocket ? ": inside" : ": outside") : "")))}</table>`
-        : `<p class="muted">${esc(e.drug_site_note || "no drug-binding site defined for this gene")}</p>`}`},
-    {label: "Conservation", html: cs ? `<p class="synthesis">${esc(cs.headline)} <span class="muted">(${esc(cs.label)})</span></p>
-      ${cs.observed_counts ? conservationChart(cs, ref, alt) : ""}
-      <table>${row("Weighted frequency of the M. tuberculosis residue", cs.ref_frequency_weighted !== null ? esc(`${cs.ref_frequency_weighted} (95% interval ${cs.ref_frequency_ci95.join("–")})`) : null)}
-      ${row("Gap in the alignment here", esc(`${(cs.gap_fraction * 100).toFixed(0)}% of sequences`))}
-      ${row("Percentile within the protein", esc(cs.percentile_within_protein))}${cs.note ? row("Note", esc(cs.note)) : ""}</table>` : na},
-    {label: "Details", html: `<h3>Numbering</h3><table>${row("Mtb (WHO / H37Rv)", esc(n.mtb_label))}${row("UniProt", n.uniprot ? esc(n.uniprot.accession + " " + n.uniprot.pos) : null)}
-      ${row("Structure residue", st ? esc(`${st.source} ${st.id}${st.chain ? " chain " + st.chain : ""}, residue ${st.auth_resnum ?? "-"}`) : null)}${n.ecoli ? row("E. coli", esc(n.ecoli.aa + n.ecoli.pos)) : ""}</table>
-      ${p ? `<h3>Property change</h3><table>${row("Charge", esc(`${p.charge_change >= 0 ? "+" : ""}${p.charge_change}`))}${row("Volume", esc(`${p.volume_change >= 0 ? "+" : ""}${p.volume_change} Å³`))}${row("Hydrophobicity", esc(`${p.hydrophobicity_change >= 0 ? "+" : ""}${p.hydrophobicity_change}`))}</table>` : ""}
-      ${callBlock(c.call, c.call_note)}${pointsBlock(c)}`}];
-}
-const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
-
-function otherTabs(c) {                    // truncation and large deletion: a short overview, then the rest
-  let ov = "";
-  if (c.state === "truncation") {
-    const t = c.truncation, l = c.lof_tolerance;
-    ov = `<div class="stats">${tile("Protein lost", `${t.percent_protein_lost}%`, `from residue ${t.first_residue_lost} of ${t.protein_length}`)}
-      ${tile("Catalytic site", t.catalytic_site ? `${t.catalytic_site.residues_lost.length} of ${t.catalytic_site.residues.length} lost` : "none defined", t.catalytic_site ? t.catalytic_site.definition : "")}
-      ${tile("Loss-of-function tolerance", cap(l.label), `TnSeq ${l.tnseq_call || "n/a"}`)}</div>
-      ${(t.pfam_domains_affected || []).length ? `<p class="muted">Domains affected: ${t.pfam_domains_affected.map(x => esc(`${x.name} (${x.effect})`)).join("; ")}.</p>` : ""}`;
-  } else if (c.state === "large_deletion") {
-    const dl = c.deletion, hit = dl.genes.filter(g => (g.fraction_deleted ?? g.fraction_of_gene_deleted) >= 0.99).length;
-    ov = `<div class="stats">${tile("Size", `${dl.size_bp.toLocaleString()} bp`, `${dl.start}–${dl.end}`)}
-      ${tile("Genes affected", String(dl.genes.length), `${hit} deleted completely`)}</div>
-      <div class="tbl-wrap"><table class="grid"><tr><th>Gene</th><th>Fraction lost</th><th>Loss-of-function tolerance</th></tr>
-      ${dl.genes.map(g => `<tr><td>${esc(g.gene)}</td><td>${esc(g.fraction_deleted ?? g.fraction_of_gene_deleted)}</td><td>${esc(g.lof_tolerance ? g.lof_tolerance.label : "")}</td></tr>`).join("")}</table></div>`;
-  } else ov = c.reason ? `<p>${esc(c.reason)}</p>` : "";
-  return [{label: "Overview", html: `${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${ov}`},
-          {label: "Details", html: `${callBlock(c.call, c.call_note)}${pointsBlock(c)}`}];
-}
-
-function renderCard(c, open) {
-  const list = c.state === "missense" ? missenseTabs(c) : (["truncation", "large_deletion"].includes(c.state) ? otherTabs(c) : null);
-  const kind = {truncation: "Truncation", large_deletion: "Large deletion", fail_low_coverage: "Fail, low coverage"}[c.state];
-  let body;
-  if (list) body = tabs("t" + (tabSeq++), list);
-  else {
-    body = `${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${c.reason ? `<p>${esc(c.reason)}</p>` : ""}`;
-    if (c.state === "tier2_on_demand" || c.state === "not_built") {
-      const v = c.variant || {};
-      body += `<p><button class="small" data-explain='${esc(JSON.stringify({pos: v.pos, ref: v.ref, alt: v.alt}))}'>Build the evidence for this variant</button></p>`;
-    }
-    body += callBlock(c.call, c.call_note) + pointsBlock(c);
-  }
-  return `<details class="cardx" ${open ? "open" : ""}><summary><span class="ttl">${esc(c.title)}</span>${whoChips(c.who_catalogue)}
-      ${kind ? `<span class="chip ${c.state === "fail_low_coverage" ? "serious" : ""}">${kind}</span>` : ""}
-      <span class="muted n">${c.tier ? "Tier " + c.tier + " · " : ""}${(c.evidence_points || []).length} points</span></summary>
-    <div class="body">${body}</div></details>`;
-}
-
-// ---- the stage-8 panel: key findings first, then two compact groups
-function renderEvidence(d) {
-  const KEY = ["missense", "truncation", "large_deletion", "fail_low_coverage"];
-  const key = d.cards.filter(c => KEY.includes(c.state)).sort((a, b) => rankOf(a) - rankOf(b) || a.title.localeCompare(b.title));
-  const pending = d.cards.filter(c => ["tier2_on_demand", "not_built", "preparing"].includes(c.state)).sort((a, b) => rankOf(a) - rankOf(b));
-  const none = d.cards.filter(c => c.state === "no_evidence");
-  const assoc = key.filter(c => rankOf(c) <= 1).length;
-  // no-evidence items grouped by why, so 38 near-identical cards become a handful of lines
-  const groups = {};
-  none.forEach(c => { const head = (c.reason || "No evidence available").split(":")[0];
-    (groups[head] = groups[head] || {reason: c.reason, names: []}).names.push((c.title || "").split(":")[0]); });
-  return `<p class="lead">For each finding: where the variant sits in the protein, how close it is to the drug, how conserved the
-      residue is and how different the new residue is. The WHO catalogue call is shown as published and is never changed by this evidence.</p>
-    <div class="stats">${tile("Findings with evidence", String(key.length))}${tile("Associated with resistance", String(assoc), "WHO group 1–2")}
-      ${tile("Awaiting evidence", String(pending.length), "built on request")}${tile("Not applicable", String(none.length), "no protein effect")}</div>
-    <h3>Key findings</h3>
-    <div id="cards">${key.map((c, i) => renderCard(c, i === 0 && rankOf(c) <= 1)).join("") || `<p class="muted">No variant in a catalogue gene needed evidence.</p>`}</div>
-    ${pending.length ? `<h3>Other variants in catalogue genes</h3>
-      <p class="muted">Genes without a precomputed structural model. Evidence is built from the AlphaFold model and homologs when you ask for it.</p>
-      <div class="tbl-wrap"><table class="grid"><tr><th>Variant</th><th>WHO catalogue</th><th></th></tr>
-      ${pending.map(c => { const v = c.variant || {};
-        return `<tr><td>${esc(c.title)}</td><td>${whoChips(c.who_catalogue)}</td><td><button class="small ghost" data-explain='${esc(JSON.stringify({pos: v.pos, ref: v.ref, alt: v.alt}))}'>Build evidence</button></td></tr>
-        <tr><td colspan="3" class="xrow"></td></tr>`; }).join("")}</table></div>` : ""}
-    ${none.length ? `<h3>Where structural evidence does not apply</h3>
-      ${Object.entries(groups).map(([head, g]) => `<details class="grp"><summary>${esc(head)} <span class="chip">${g.names.length}</span></summary>
-        <p class="muted">${esc(g.reason || "")}</p><p class="names">${g.names.map(n => `<code>${esc(n)}</code>`).join(" ")}</p></details>`).join("")}` : ""}
-    <details class="grp"><summary>How to read this</summary><ul class="muted">${d.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></details>`;
-}
-function wireCards(root) {
-  wireCharts(root);
-  root.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-    const [grp] = t.dataset.tab.split("-").slice(0, 1), id = t.dataset.tab, scope = t.closest(".body") || root;
-    scope.querySelectorAll(`.tab[data-tab^="${grp}-"]`).forEach(x => x.setAttribute("aria-selected", x === t));
-    scope.querySelectorAll(`.tabpanel[data-panel^="${grp}-"]`).forEach(x => x.hidden = x.dataset.panel !== id);
-  });
-  root.querySelectorAll("[data-mol]").forEach(b => b.onclick = () => openMol(b));
-  root.querySelectorAll("[data-explain]").forEach(b => b.onclick = () => explainInto(b, JSON.parse(b.dataset.explain)));
-}
-function openMol(btn) {
-  const st = JSON.parse(btn.dataset.mol), slot = btn.nextElementSibling;
-  if (typeof PDBeMolstarPlugin === "undefined") { slot.innerHTML = '<p class="muted">3D viewer could not load (offline?). The evidence tables still work.</p>'; return; }
-  slot.innerHTML = '<div class="viewer"></div>';
-  viewer = new PDBeMolstarPlugin();
-  viewer.render(slot.firstChild, {moleculeId: st.id.toLowerCase(), hideControls: true, hideCanvasControls: ["animation", "selection"],
-    bgColor: matchMedia("(prefers-color-scheme: dark)").matches ? {r: 31, g: 31, b: 29} : {r: 255, g: 255, b: 255}});
-  viewer.events.loadComplete.subscribe(() => {
-    try { viewer.visual.select({data: [{auth_asym_id: st.chain, start_auth_residue_number: st.auth_resnum, end_auth_residue_number: st.auth_resnum,
-      color: {r: 235, g: 104, b: 52}, sideChain: true, focus: true}], nonSelectedColor: {r: 200, g: 200, b: 195}}); } catch (e) { console.warn(e); }
-  });
-}
-async function explainInto(btn, q, tries = 0) {
-  const holder = btn.closest(".body"); btn.disabled = true; btn.textContent = "Working…";
-  const qs = new URLSearchParams({pos: q.pos, ref: q.ref || "", alt: q.alt || ""});
-  try {
-    const c = await api(`/api/jobs/${jobId}/explain?${qs}`);
-    if (c.state === "preparing" && tries < 450) { btn.textContent = "Evidence being prepared (AlphaFold + homologs; can take minutes)…"; setTimeout(() => explainInto(btn, q, tries + 1), 4000); return; }
-    const tmp = document.createElement("div"); tmp.innerHTML = renderCard(c); const d = tmp.firstChild; d.open = true;
-    (btn.closest("tr") ? btn.closest("tr").nextElementSibling.querySelector("td") : holder).prepend(d); wireCards(d); btn.remove();
-  } catch (e) { btn.disabled = false; btn.textContent = "Retry"; btn.insertAdjacentHTML("afterend", `<span class="msg">${esc(e.message)}</span>`); }
-}
-
 // ------------------------------------------------------------------ report: drugs + variants table
 let vScope = "priority", vQ = "", vOff = 0;
 function wireReport(d) {
@@ -694,15 +462,10 @@ function wireReport(d) {
   loadVars(true);
 }
 async function loadVars(reset) {
-  if (reset) { vOff = 0; $("#vtbl").innerHTML = `<tr><th>Gene</th><th>Variant</th><th>Effect</th><th>Callers</th><th>AF</th><th>Depth</th><th>WHO</th><th>Evidence</th></tr>`; }
+  if (reset) { vOff = 0; $("#vtbl").innerHTML = `<tr><th>Gene</th><th>Variant</th><th>Effect</th><th>Calling</th><th>AF</th><th>Depth</th><th>WHO catalogue</th></tr>`; }
   const r = await api(`/api/jobs/${jobId}/variants?` + new URLSearchParams({scope: vScope, q: vQ, offset: vOff, limit: 100}));
   $("#vscope").textContent = vScope === "priority" ? "Show all variants" : "Show WHO / resistance-gene variants only";
-  $("#vtbl").insertAdjacentHTML("beforeend", r.rows.map(v => {
-    const od = v.evidence_state === "on demand";
-    const e = od ? `<button class="small" data-explain='${esc(JSON.stringify({pos: v.pos, ref: v.ref, alt: v.alt}))}'>Explain</button>` : `${esc(v.evidence_state.replace(/_/g, " "))}${v.evidence_points ? ` · ${v.evidence_points.split(",").length} pts` : ""}`;
-    return `<tr><td>${esc(v.gene)}</td><td>${esc(v.variant || v.type)}</td><td>${esc(v.effect)}</td><td>${esc(v.callers)}</td><td>${esc(v.allele_fraction)}</td><td>${esc(v.depth)}</td>
-      <td>${esc(v.who_drug_grading) || na}</td><td>${e}</td></tr><tr><td colspan="8" class="xrow"></td></tr>`;
-  }).join(""));
-  wireCards($("#vtbl"));
+  $("#vtbl").insertAdjacentHTML("beforeend", r.rows.map(v => `<tr><td>${esc(v.gene)}</td><td>${esc(v.variant || v.type)}</td><td>${esc(v.effect)}</td>
+      <td>${esc(v.callers)}</td><td>${esc(v.allele_fraction)}</td><td>${esc(v.depth)}</td><td>${esc(v.who_drug_grading) || na}</td></tr>`).join(""));
   vOff += r.rows.length; $("#vcount").textContent = `${vOff} of ${r.total} shown`; $("#vmore").hidden = vOff >= r.total;
 }
