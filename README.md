@@ -11,54 +11,42 @@ Static demonstration of the **MTB ResiFiler** resistance-profiling pipeline for
 
 ## What this page shows
 
-Five publicly available *M. tuberculosis* Illumina runs from ENA, already taken through the
-pipeline. For each isolate you can step through what every stage produced:
+The layout follows the steps of our earlier app: **1 Pipeline Configuration**, **2 Submit New Job**, **3 Job Dashboard**
+and **4 Active Job Manager**, with one tab per pipeline step, each showing that step's output.
 
-| Stage | Tool |
+| Tab | Output shown |
 |---|---|
-| 1 Upload and validation | in-browser format check |
-| 2 QC and species / contamination check | fastp, Mash screen |
-| 3 Trimming | fastp |
-| 4 Alignment and coverage | BWA-MEM, samtools markdup, mosdepth |
-| 5 Variant calling | MTB-ResiFiler's own orchestrated caller (fixed, not selectable; method unpublished) |
-| 6 Annotation and numbering | SnpEff, checked against the WHO catalogue's genomic coordinates |
-| 7 WHO catalogue v2 lookup per drug | loss-of-function and deletion rules; low coverage reports Fail, never susceptible |
-| 8 Report | JSON and TSV download |
+| 1 QC | read statistics, species and contamination check, the QC report |
+| 2 Trimming | before/after statistics, reads removed, the trimming log |
+| 3 Alignment | aligner, mapping rate |
+| 4 BAM QC | depth, genome coverage, depth across the resistance loci |
+| 5 BAM Processing | duplicate rate (marked, not removed) |
+| 6 Variant Calling | counts by type and class, a VCF preview. MTB-ResiFiler's own orchestrated caller: fixed, not selectable, method unpublished |
+| 7 Annotation | effect summary, gene table, variants in catalogue genes, download |
+| 8 Filtering | how the WHO profile is read, lineage |
+| 9 Report | lineage, drug resistance profile, mutation landscape, CSV / HTML / JSON / TSV downloads |
+| 10 AI Prediction | machine-learning MIC prediction: **in development**, not part of this run |
 
-**MIC prediction (machine learning) is in development** and is not part of this run.
+**The resistance call always comes from the WHO catalogue v2.** Grade 1-2 variants give resistance (fixed at an allele
+fraction of 90% or more, heteroresistance below it). Grade 3 variants are listed as uncertain significance and are not
+counted as resistance. Loss-of-function and deletion rules are not applied for now, so such a variant is reported
+**Not assessed**, never susceptible. Low coverage at a resistance locus is reported **Fail**, never susceptible.
 
-**The resistance call always comes from the WHO catalogue v2.**
+### Tool combination, not a tool menu
 
-### Tool chain, not a tool menu
+Every stage takes a tool parameter, but a tool is offered only as part of a *validated combination*: one that has been run
+end to end on the test data together. Selecting a tool outside the validated set stops the run with an explicit error
+rather than producing results. The variant-calling step is fixed.
 
-Every stage takes a tool parameter, but a tool is offered only as part of a *validated chain*: a
-preset is a combination that has been run end to end on the test data together. Selecting a tool
-outside the validated set stops the run with an explicit error rather than producing results, and
-any deviation is printed at the top of the report. One preset (`Standard`) ships today.
+## The sample output
 
-## Isolates
-
-| ENA run | Why it is in the test set |
-|---|---|
-| ERR4811184 | Rifampicin-resistant, rpoB S450L |
-| ERR4810953 | pncA frameshift (loss of function) |
-| ERR4810628 | katG frameshift (loss of function) |
-| ERR3287702 | Large deletion spanning pncA |
-| ERR4811099 | Pan-susceptible control |
-
-Expected genotypes come from the CRyPTIC consortium (release_june2022) and are used only as an
-external reference, never for tuning.
-
-## The variant caller
-
-Variant calling is MTB-ResiFiler's exclusive orchestrated caller. It is shown as a fixed step with its
-output (what was called, and the class of each call) but is not selectable and its method is not
-described, because it is unpublished work.
+The page shows one stored sample output: the public ENA run ERR4811184 (a rifampicin-resistant isolate), already taken
+through the pipeline. Nothing is simulated and nothing is recomputed for display.
 
 ## What this page does not do
 
 * It does not run the pipeline. Uploading a sequence and watching it run is demonstrated live at
-  the poster; this page shows stored results.
+  the poster; this page checks a file's format in your browser and shows the stored sample output.
 * No machine-learning predictor and no MIC prediction are included; both are in development.
 * No patient data. Every isolate is a public ENA run; no sequence reads are published here.
 

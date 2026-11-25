@@ -5,75 +5,76 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MTB ResiFiler</title>
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar.css">
-<script src="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-plugin.js"></script>
 </head>
 <body>
 <header class="wrap">
   <div class="brand">
     <span class="logo" aria-hidden="true">
-      <svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="14" fill="none" stroke="var(--series-1)" stroke-width="2"/><path d="M9 20c4-10 10 2 14-8" fill="none" stroke="var(--series-1)" stroke-width="2.5" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="14" fill="none" stroke="var(--accent)" stroke-width="2"/><path d="M9 20c4-10 10 2 14-8" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/></svg>
     </span>
     <div>
-      <h1>MTB ResiFiler</h1>
-      <p class="tagline">From an <i>M. tuberculosis</i> sequence to WHO catalogue v2 resistance calls, with the call reported for each drug.</p>
+      <h1>MTB-ResiFiler Pipeline Dashboard</h1>
+      <p class="tagline">From an <i>M. tuberculosis</i> sequence to a WHO catalogue v2 resistance profile. Check the output of every step.</p>
     </div>
   </div>
   <div class="banner" id="banner" role="note"></div>
 </header>
 
 <main class="wrap">
-  <!-- ---------------------------------------------------------------- step 1 -->
-  <section class="card step-card" id="s1">
-    <div class="step-head"><span class="num">1</span><h2>Provide a sequence</h2><span class="chip" id="s1state">waiting</span></div>
-
-    <label class="drop" id="drop">
-      <input type="file" id="files" multiple accept=".fastq,.fq,.fasta,.fa,.fna,.fas,.vcf,.gz">
-      <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <b id="dropText">Choose a file, or drop it here</b>
-      <small id="limits"></small>
-    </label>
-
-    <div class="or"><span>or</span></div>
-    <button class="ghost wide" id="useSample">Use a public test isolate</button>
-
-    <div id="samplesWrap" hidden>
-      <p class="muted" id="pickerNote"></p>
-      <ul id="samples" class="samples"></ul>
+  <!-- ---------------------------------------------------------------- 1 -->
+  <section class="card" id="s1">
+    <div class="step-head"><span class="num">1</span><h2>Pipeline Configuration</h2><span class="chip" id="s1state">waiting</span></div>
+    <div class="tools modeswitch">
+      <button class="small" data-mode="std">Standard (Recommended)</button>
+      <button class="ghost small" data-mode="adv">Advanced (Custom)</button>
     </div>
-
-    <div id="inputReport" hidden></div>
-    <p id="formMsg" class="msg" role="alert"></p>
-  </section>
-
-  <!-- ---------------------------------------------------------------- step 2 -->
-  <section class="card step-card" id="s2">
-    <div class="step-head"><span class="num">2</span><h2>Tool combination</h2><span class="chip" id="s2state">waiting</span></div>
     <p class="muted lead" id="chooserLead"></p>
     <div id="combos" class="combos"></div>
     <div id="chainWrap"></div>
   </section>
 
-  <!-- ---------------------------------------------------------------- step 3 -->
-  <section class="card step-card" id="s3">
-    <div class="step-head"><span class="num">3</span><h2>Run and read the result</h2><span class="chip" id="s3state">waiting</span></div>
-    <div class="tools" id="runRow">
-      <button id="runBtn" disabled>Run the pipeline</button>
-      <button class="ghost" id="sampleOut">Show sample output</button>
+  <!-- ---------------------------------------------------------------- 2 -->
+  <section class="card" id="s2">
+    <div class="step-head"><span class="num">2</span><h2>Submit New Job</h2><span class="chip" id="s2state">waiting</span></div>
+    <details class="grp" open>
+      <summary>Upload FASTQ Files</summary>
+      <div class="inner">
+        <label class="drop" id="drop">
+          <input type="file" id="files" multiple accept=".fastq,.fq,.fasta,.fa,.fna,.fas,.vcf,.gz">
+          <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <b id="dropText">Choose your FASTQ files (paired end), or drop them here</b>
+          <small id="limits"></small>
+        </label>
+        <div id="inputReport" hidden></div>
+        <p id="formMsg" class="msg" role="alert"></p>
+      </div>
+    </details>
+    <div class="tools">
+      <button id="runBtn" disabled>Start New Pipeline (Run QC)</button>
+      <button class="ghost" id="sampleOut">View sample output</button>
     </div>
     <p class="muted" id="runNote"></p>
   </section>
 
-  <!-- ---------------------------------------------------------------- results -->
-  <section id="job" hidden>
-    <div class="card">
-      <div class="row"><h2>Pipeline run</h2><span id="jobState" class="chip"></span></div>
-      <p class="muted" id="jobMeta"></p>
-      <ol id="stepper" class="stepper"></ol>
-      <p id="jobError" class="msg" role="alert"></p>
+  <!-- ---------------------------------------------------------------- 3 -->
+  <section class="card" id="s3">
+    <div class="step-head"><span class="num">3</span><h2>Job Dashboard</h2></div>
+    <p class="muted" id="dashEmpty">No jobs submitted yet. Use the uploader above to start a new analysis, or view the sample output.</p>
+    <div class="tbl-wrap" id="dashWrap" hidden>
+      <table class="grid" id="dash"></table>
     </div>
-    <div id="notes" class="card" hidden></div>
-    <div id="panel" class="card" hidden></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- 4 -->
+  <section class="card" id="s4">
+    <div class="step-head"><span class="num">4</span><h2>Active Job Manager</h2></div>
+    <p class="muted" id="mgrEmpty">No job selected. Click “Manage” on a job in the dashboard to see its pipeline steps.</p>
+    <div id="mgr" hidden>
+      <p id="mgrTitle" class="synthesis"></p>
+      <p id="jobError" class="msg" role="alert"></p>
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div id="tabpanel" role="tabpanel"></div>
+    </div>
   </section>
 </main>
 
