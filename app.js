@@ -259,7 +259,7 @@ function renderCombos() {
         : "Not applicable to this input"}</small></button>`;
   }).join("");
   document.querySelectorAll("[data-combo]").forEach(b => b.onclick = () => { comboKey = b.dataset.combo; renderCombos(); });
-  $("#chainWrap").innerHTML = comboKey ? toolPanel(comboKey === "fastq" ? "fastq_paired" : "fasta_assembly") : "";
+  $("#chainWrap").innerHTML = comboKey ? toolPanel(comboKey === "fastq" ? "fastq_paired" : "fasta_assembly", true) : "";
   setState("s2", comboKey ? "selected" : "waiting", comboKey ? "good" : "");
 }
 function afterInput() {
@@ -382,7 +382,7 @@ const RENDER = {
     <h3>WHO catalogue calls per drug</h3><div id="rdrugs"></div>
     <h3>Variants</h3><div id="rvars"></div>`
 };
-function toolPanel(inputType) {
+function toolPanel(inputType, brief) {
   const combs = cfg.tool_combinations;
   if (!combs) return "";
   const key = (inputType || "").startsWith("fastq") ? "fastq" : "fasta";
@@ -393,18 +393,18 @@ function toolPanel(inputType) {
     coverage: "Coverage", call_majority: "Calling: majority alleles", call_lowfreq: "Calling: low-frequency alleles",
     call_largedel: "Calling: large deletions", annotate: "Annotation and numbering"};
   const other = combs[key === "fastq" ? "fasta" : "fastq"];
-  return `<h3>Tool combination: ${esc(c.label)}</h3>
+  // inside step 2 the chooser has already made the argument; don't repeat it
+  return `${brief ? `<h3>What runs, and why each tool</h3>` : `<h3>Tool combination: ${esc(c.label)}</h3>
     <p class="muted">Tools are not picked one stage at a time. A combination is validated <b>as a whole</b> and was run
     end to end on the test data together, because a chain that looks reasonable at each step can still be wrong overall:
-    a short-read aligner used on assembled contigs is valid as a tool and wrong as a choice. Each tool below says why it
-    is the one used for this kind of data. Selecting a tool outside the validated set stops the run with an explicit
-    error rather than producing results, and any deviation is printed at the top of the report.
-    Preset in use: <b>${esc(cfg.preset)}</b>.</p>
-    <p>${esc(c.note)}</p>
+    a short-read aligner used on assembled contigs is valid as a tool and wrong as a choice. Selecting a tool outside the
+    validated set stops the run with an explicit error rather than producing results, and any deviation is printed at the
+    top of the report. Preset in use: <b>${esc(cfg.preset)}</b>.</p>
+    <p>${esc(c.note)}</p>`}
     <ol class="chain">${c.stages.map(k => `<li><b>${esc(names[k] || k)}</b> <code>${esc(cfg.tools[k])}</code>
       <p class="muted">${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>
-    ${other ? `<p class="muted">The other combination, <b>${esc(other.label)}</b>, is selected automatically when that
-      kind of input is uploaded. ${esc(other.note)}</p>` : ""}`;
+    ${other && !brief ? `<p class="muted">The other combination, <b>${esc(other.label)}</b>, is selected automatically
+      when that kind of input is uploaded. ${esc(other.note)}</p>` : ""}`;
 }
 const variantsLink = () => `<p><button class="ghost small" data-go="report">Open the full variant table in the report</button></p>`;
 function wireVariantsLink() { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => showStage(b.dataset.go)); }
