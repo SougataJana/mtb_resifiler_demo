@@ -215,26 +215,34 @@ const RENDER = {
          <button class="ghost" data-dl="drugs.tsv">Download TSV (drug calls)</button>`
       : `<a class="btn" href="/api/jobs/${jobId}/report.json">Download JSON</a><a class="btn" href="/api/jobs/${jobId}/report.tsv">Download TSV (variants)</a>
          <a class="btn ghost" href="/api/jobs/${jobId}/drugs.tsv">Download TSV (drug calls)</a>`}</div>
-    ${toolPanel()}
+    ${toolPanel(d.input_type)}
     ${d.notes.length ? "<h3>Notes</h3><ul>" + d.notes.map(n => `<li>${esc(n)}</li>`).join("") + "</ul>" : ""}
     <h3>WHO catalogue calls per drug</h3><div id="rdrugs"></div>
     <h3>Variants</h3><div id="rvars"></div>`
 };
-function toolPanel() {
-  if (!cfg.tools) return "";
-  const names = {qc: "QC", trim: "Trimming", align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)",
-    markdup: "Duplicate marking", coverage: "Coverage", species: "Species check", call_majority: "Calling, majority alleles",
-    call_lowfreq: "Calling, low-frequency alleles", call_largedel: "Calling, large deletions", annotate: "Annotation"};
-  return `<h3>Tool chain: what ran at each stage</h3>
-    <p class="muted">Every stage takes a tool parameter, but a tool is offered only as part of a <b>validated chain</b>.
-    A preset is a combination of tools that has been run end to end on the test data together, not a free pick per step:
-    listing options stage by stage leaves the user to guess whether a combination is scientifically sound. Selecting a tool
-    outside the validated set stops the run with an explicit error instead of producing results, and any deviation is
-    printed at the top of the report. Today one preset ships (<b>${esc(cfg.preset)}</b>), so each stage has a single
-    allowed tool; adding alternatives means validating the whole chain, which is future work.</p>
-    <div class="tbl-wrap"><table class="grid"><tr><th>Stage</th><th>Tool in use</th><th>Allowed</th></tr>
-    ${Object.entries(cfg.tools).map(([k, v]) => `<tr><td>${esc(names[k] || k)}</td><td>${esc(v)}</td>
-      <td>${esc((cfg.allowed_tools?.[k] || []).join(", "))}</td></tr>`).join("")}</table></div>`;
+function toolPanel(inputType) {
+  const combs = cfg.tool_combinations;
+  if (!combs) return "";
+  const key = (inputType || "").startsWith("fastq") ? "fastq" : "fasta";
+  const c = combs[key];
+  if (!c) return "";
+  const names = {species: "Species and contamination check", qc: "Read QC", trim: "Trimming",
+    align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)", markdup: "Duplicate marking",
+    coverage: "Coverage", call_majority: "Calling: majority alleles", call_lowfreq: "Calling: low-frequency alleles",
+    call_largedel: "Calling: large deletions", annotate: "Annotation and numbering"};
+  const other = combs[key === "fastq" ? "fasta" : "fastq"];
+  return `<h3>Tool combination: ${esc(c.label)}</h3>
+    <p class="muted">Tools are not picked one stage at a time. A combination is validated <b>as a whole</b> and was run
+    end to end on the test data together, because a chain that looks reasonable at each step can still be wrong overall:
+    a short-read aligner used on assembled contigs is valid as a tool and wrong as a choice. Each tool below says why it
+    is the one used for this kind of data. Selecting a tool outside the validated set stops the run with an explicit
+    error rather than producing results, and any deviation is printed at the top of the report.
+    Preset in use: <b>${esc(cfg.preset)}</b>.</p>
+    <p>${esc(c.note)}</p>
+    <ol class="chain">${c.stages.map(k => `<li><b>${esc(names[k] || k)}</b> <code>${esc(cfg.tools[k])}</code>
+      <p class="muted">${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>
+    ${other ? `<p class="muted">The other combination, <b>${esc(other.label)}</b>, is selected automatically when that
+      kind of input is uploaded. ${esc(other.note)}</p>` : ""}`;
 }
 const variantsLink = () => `<p><button class="ghost small" data-go="report">Open the full variant table in the report</button></p>`;
 function wireVariantsLink() { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => showStage(b.dataset.go)); }
