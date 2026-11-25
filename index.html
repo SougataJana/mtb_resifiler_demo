@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTB ResiFiler</title>
+<link rel="stylesheet" href="style.css">
+<!-- Mol* (PDBe build, same as the evidence demo) from CDN; everything else is plain HTML/JS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar.css">
+<script src="https://cdn.jsdelivr.net/npm/pdbe-molstar@3.3.0/build/pdbe-molstar-plugin.js"></script>
+</head>
+<body>
+<header>
+  <h1>MTB ResiFiler</h1>
+  <p class="sub">From an <i>M. tuberculosis</i> sequence upload to WHO catalogue v2 resistance calls, with an additive evidence layer.</p>
+  <div class="banner" id="banner" role="note"></div>
+</header>
+<main>
+  <section id="upload" class="card">
+    <h2>Upload</h2>
+    <form id="form">
+      <label class="drop" id="drop">
+        <input type="file" id="files" multiple accept=".fastq,.fq,.fasta,.fa,.fna,.fas,.vcf,.gz">
+        <span id="dropText">Choose files or drop them here</span>
+      </label>
+      <p class="muted" id="limits"></p>
+      <button type="submit" id="go" disabled>Start analysis</button>
+      <span id="formMsg" class="msg" role="alert"></span>
+    </form>
+    <details><summary>Privacy</summary>
+      <p class="muted">Uploaded genomes are sensitive. File names are not kept. Your reads are deleted from the server as soon
+      as the run ends; only the results (variant calls, annotations, evidence, report) are kept, and are deleted
+      <span id="purge">7</span> days after upload. Anyone with this page's link can read the results, so do not share it.
+      Logs contain job ids, states and sizes only, never sequence content.</p></details>
+  </section>
+
+  <section id="picker" class="card" hidden>
+    <h2>Choose an isolate</h2>
+    <p class="muted" id="pickerNote"></p>
+    <ul id="samples" class="samples"></ul>
+    <details><summary>What am I looking at?</summary>
+      <p class="muted">These are real, publicly available <i>M. tuberculosis</i> sequencing runs from ENA, already taken
+      through the pipeline. The pages below show what each stage produced, the WHO catalogue v2 call per drug, and the
+      evidence behind each variant. This static page shows stored results; the live pipeline, where a sequence is uploaded
+      and run, is demonstrated at the poster.</p></details>
+  </section>
+
+  <section id="job" hidden>
+    <div class="card">
+      <div class="row"><h2>Progress</h2><span id="jobState" class="chip"></span></div>
+      <p class="muted" id="jobMeta"></p>
+      <ol id="stepper" class="stepper"></ol>
+      <p id="jobError" class="msg" role="alert"></p>
+    </div>
+    <div id="notes" class="card" hidden></div>
+    <div id="panel" class="card" hidden></div>
+  </section>
+</main>
+<footer class="muted">Reference: <span id="ref"></span> · Poster freeze date: [FILL IN] · The resistance call is the WHO catalogue v2 call; the evidence layer never changes it.</footer>
+<script>window.RESIFILER_DEMO = true;</script>
+<script src="app.js"></script>
+</body>
+</html>
