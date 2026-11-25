@@ -373,11 +373,7 @@ const RENDER = {
     ${Object.entries(d.drugs).map(([drug, v]) => `<tr><td>${esc(drug)}</td><td>${statusChip(v.status)}${v.qualifier ? `<br><small>${esc(v.qualifier)}</small>` : ""}
       ${v.failed_loci.length ? `<br><small>low coverage at ${v.failed_loci.map(esc).join(", ")}</small>` : ""}</td>
       <td>${v.resistance_variants.map(esc).join("<br>") || na}</td><td>${v.uncertain_variants.map(esc).join("<br>") || na}</td></tr>`).join("")}</table></div>`,
-  explain: d => `<p>${esc(d.evidence_package)}. ${d.notes.map(esc).join(" ")}</p>
-    <p>${d.summary.cards} cards shown up front (WHO catalogue genes and large deletions in them); ${d.summary.other_variants} other variants can be explained on request in the report table.</p>
-    <div id="cards">${d.cards.filter(c => !["no_evidence"].includes(c.state)).map(renderCard).join("")}
-    <details><summary>${d.cards.filter(c => c.state === "no_evidence").length} variants with no evidence available (reason shown)</summary>
-    ${d.cards.filter(c => c.state === "no_evidence").map(renderCard).join("")}</details></div>`,
+  explain: d => renderEvidence(d),
   report: d => `<p><b>${esc(d.title)}</b></p>${d.statement.map(s => `<p>${esc(s)}</p>`).join("")}
     <p>Reference: ${esc(d.reference)} · Catalogue: ${esc(d.catalogue)} · Preset: ${esc(d.preset)} · Poster freeze date: ${esc(d.poster_freeze_date)}</p>
     <div class="tools">${DEMO
@@ -507,69 +503,149 @@ function wireCharts(root) {
 }
 
 // ------------------------------------------------------------------ evidence cards
-function whoBlock(w) {
+// ------------------------------------------------------------------ evidence: ranked, grouped, tabbed
+// The WHO grade decides the order and the colour. Grades 1-2 are "associated with resistance", 3 is
+// uncertain, 4-5 are "not associated"; every chip carries a glyph and the words, never colour alone.
+const gradeNo = g => { const m = /^(\d)\)/.exec(g || ""); return m ? +m[1] : null; };
+const GRADE_CLASS = g => { const n = gradeNo(g); return n === 1 || n === 2 ? "critical" : n === 3 ? "warning" : n ? "good" : "info"; };
+function whoChips(w) {
   if (!w) return "";
-  if (!w.listed) return `<div class="who"><span class="muted">WHO catalogue v2</span> · <b>${esc(w.label)}</b></div>`;
-  return `<div class="who"><span class="muted">WHO catalogue v2 (unchanged)</span> · <b>${esc(w.variant)}</b><br>${w.rows.map(r => `${esc(r.drug)}: ${esc(r.label || r.grading)}`).join("<br>")}</div>`;
+  if (!w.listed) return `<span class="chip info"><span class="g" aria-hidden="true">${GLYPH.info}</span>not in the catalogue</span>`;
+  const by = {};
+  (w.rows || []).forEach(r => (by[r.grading] = by[r.grading] || []).push(r));      // one chip per shared grade
+  return Object.entries(by).map(([g, rs]) => { const c = GRADE_CLASS(g);
+    return `<span class="chip ${c}"><span class="g" aria-hidden="true">${GLYPH[c]}</span>${rs.map(r => esc(r.drug)).join(", ")} · ${esc(rs[0].label || g)}</span>`; }).join(" ");
 }
+const rankOf = c => {                         // lower = shown first
+  const ns = ((c.who_catalogue || {}).rows || []).map(r => gradeNo(r.grading)).filter(Boolean);
+  return ns.length ? Math.min(...ns) - 1 : 5;
+};
+const tile = (k, v, sub) => `<div class="stat sm"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${sub ? `<div class="k">${esc(sub)}</div>` : ""}</div>`;
+
+function tabs(id, list) {
+  return `<div class="tabs" role="tablist">${list.map((t, i) => `<button class="tab" role="tab" data-tab="${id}-${i}"
+      aria-selected="${i === 0}">${esc(t.label)}</button>`).join("")}</div>
+    ${list.map((t, i) => `<div class="tabpanel" role="tabpanel" data-panel="${id}-${i}" ${i ? "hidden" : ""}>${t.html}</div>`).join("")}`;
+}
+let tabSeq = 0;
+
 function callBlock(c, note) {
   if (!c) return note ? `<p class="muted">${esc(note)}</p>` : "";
-  const a = c.allele_fraction_note;
-  const cl = c.callers || [];
+  const a = c.allele_fraction_note, cl = c.callers || [];
   return `<h3>Call</h3><table>${row(cl.length > 1 ? "Callers" : "Calling", esc(cl.join(" + ")))}${row("Call class", esc(c.call_class))}
     ${row("Allele fraction", c.allele_fraction === null ? na : esc(c.allele_fraction))}${row("Depth", c.depth === null ? na : esc(c.depth))}
     ${a ? row("Allele-fraction note", esc(a.note) + (a.warnings || []).map(w => `<br>${esc(w)}`).join("")) : ""}</table>`;
 }
-function missenseBody(e, card) {
-  const mm = /\b([A-Z])(\d+)([A-Z])\b/.exec((card && card.title) || "");
-  const ref = mm && mm[1], alt = mm && mm[3];
-  const n = e.numbering, s = e.structure, d = e.drug_site, c = e.conservation, p = e.property_change, v = e.substitution_severity;
-  const st = n.structure;
-  return `<h3>Numbering</h3><table>${row("Mtb (WHO / H37Rv)", esc(n.mtb_label))}${row("UniProt", n.uniprot ? esc(n.uniprot.accession + " " + n.uniprot.pos) : null)}
-    ${row("Structure residue", st ? esc(`${st.source} ${st.id}${st.chain ? " chain " + st.chain : ""}, residue ${st.auth_resnum ?? "-"}`) : null)}${n.ecoli ? row("E. coli", esc(n.ecoli.aa + n.ecoli.pos)) : ""}</table>
-    <h3>Structure</h3><table>${row("Model", esc(s.source))}${row("Burial (relative SASA)", s.burial ? esc(`${s.burial} (${s.relative_solvent_accessibility})`) : null)}
-    ${row("Secondary structure", esc(s.secondary_structure))}${row("Domain", esc(e.domain))}
-    ${s.catalytic_site ? row("Catalytic site", esc(s.catalytic_site.definition + ": " + (s.catalytic_site.is_catalytic_residue ? "this is a catalytic residue" : s.catalytic_site.distance_band))) : ""}
-    ${s.low_confidence ? row("Confidence", "<b>low confidence (pLDDT &lt; 70): structural values are not used</b>") : ""}${s.note ? row("Note", esc(s.note)) : ""}</table>
-    <h3>Drug site</h3>${d ? `<table>${row("Ligand", esc(d.ligand))}${row("Distance to ligand (band)", esc(d.ligand_distance_band))}${row("Pocket", esc((d.pocket || "") + (d.pocket ? (d.in_pocket ? ": inside" : ": outside") : "")))}</table>` : `<p>${esc(e.drug_site_note || "no drug-binding site defined for this gene")}</p>`}
-    <h3>Conservation</h3>${c ? `<p class="synthesis">${esc(c.headline)} <span class="muted">(${esc(c.label)})</span></p>
-    ${c.observed_counts ? conservationChart(c, ref, alt) : ""}
-    <table>${row("Weighted frequency of the M. tuberculosis residue", c.ref_frequency_weighted !== null ? esc(`${c.ref_frequency_weighted} (95% interval ${c.ref_frequency_ci95.join("–")})`) : null)}
-    ${row("Gap in the alignment here", esc(`${(c.gap_fraction * 100).toFixed(0)}% of sequences`))}
-    ${row("Conservation percentile within the protein", esc(c.percentile_within_protein))}
-    ${row("Sequences compared", esc(`${c.n_homologs_with_residue} (${c.counting})`))}${c.note ? row("Note", esc(c.note)) : ""}</table>` : na}
-    <h3>Substitution</h3><table>${p ? row("Property change", esc(`charge ${p.charge_change >= 0 ? "+" : ""}${p.charge_change}, volume ${p.volume_change >= 0 ? "+" : ""}${p.volume_change} Å3, hydrophobicity ${p.hydrophobicity_change >= 0 ? "+" : ""}${p.hydrophobicity_change}`)) : ""}
-    ${v ? row("Severity", esc(`BLOSUM62 ${v.blosum62}, Grantham ${v.grantham} (${v.grantham_class}; ${v.grantham_bands})`)) : ""}</table>`;
+const pointsBlock = c => `<h3>Evidence points shown (${(c.evidence_points || []).length})</h3>
+  <div class="pts">${(c.evidence_points || []).map(k => `<span class="chip">${esc(pt(k))}</span>`).join("")}</div>
+  <p class="disc">${esc(c.disclaimer || "")}</p>`;
+
+function missenseTabs(c) {
+  const e = c.evidence, n = e.numbering, s = e.structure, d = e.drug_site, cs = e.conservation, p = e.property_change, v = e.substitution_severity;
+  const mm = /\b([A-Z])(\d+)([A-Z])\b/.exec(c.title || ""), ref = mm && mm[1], alt = mm && mm[3], st = n.structure;
+  const low = s.low_confidence;
+  const glance = `<div class="stats">
+    ${tile("Where it sits", low ? "Low confidence" : cap(s.burial || "unknown"), low ? "pLDDT below 70, not used" : `RSA ${s.relative_solvent_accessibility ?? "n/a"} · ${s.secondary_structure || "n/a"}`)}
+    ${d ? tile("Drug site", d.ligand_distance_band, `${d.ligand}${d.pocket ? ` · ${d.pocket} ${d.in_pocket ? "inside" : "outside"}` : ""}`)
+        : tile("Drug site", "None defined", "no drug-binding site for this gene")}
+    ${cs ? tile("Conservation", `${cs.ref_count} / ${cs.n_homologs_with_residue}`, `${AA3[ref] || ref} here · ${/^not labelled/.test(cs.label) ? "sparse set, not labelled" : cs.label}`)
+         : tile("Conservation", "n/a", "no homolog set")}
+    ${v ? tile("Substitution", `Grantham ${v.grantham}`, `${v.grantham_class} · BLOSUM62 ${v.blosum62}`) : ""}</div>`;
+  const mol = st && st.source === "PDB"
+    ? `<p><button class="ghost small" data-mol='${esc(JSON.stringify(st))}'>View in 3D</button></p><div class="viewer-slot"></div>` : "";
+  return [
+    {label: "Overview", html: `${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${glance}`},
+    {label: "Structure", html: `${mol}<h3>Model and location</h3><table>${row("Model", esc(s.source))}${row("Domain", esc(e.domain))}
+      ${row("Burial (relative SASA)", s.burial ? esc(`${s.burial} (${s.relative_solvent_accessibility})`) : null)}${row("Secondary structure", esc(s.secondary_structure))}
+      ${s.catalytic_site ? row("Catalytic site", esc(s.catalytic_site.definition + ": " + (s.catalytic_site.is_catalytic_residue ? "this is a catalytic residue" : s.catalytic_site.distance_band))) : ""}
+      ${low ? row("Confidence", "<b>low confidence (pLDDT &lt; 70): structural values are not used</b>") : ""}${s.note ? row("Note", esc(s.note)) : ""}</table>
+      <h3>Drug site</h3>${d ? `<table>${row("Ligand", esc(d.ligand))}${row("Distance (band)", esc(d.ligand_distance_band))}${row("Pocket", esc((d.pocket || "") + (d.pocket ? (d.in_pocket ? ": inside" : ": outside") : "")))}</table>`
+        : `<p class="muted">${esc(e.drug_site_note || "no drug-binding site defined for this gene")}</p>`}`},
+    {label: "Conservation", html: cs ? `<p class="synthesis">${esc(cs.headline)} <span class="muted">(${esc(cs.label)})</span></p>
+      ${cs.observed_counts ? conservationChart(cs, ref, alt) : ""}
+      <table>${row("Weighted frequency of the M. tuberculosis residue", cs.ref_frequency_weighted !== null ? esc(`${cs.ref_frequency_weighted} (95% interval ${cs.ref_frequency_ci95.join("–")})`) : null)}
+      ${row("Gap in the alignment here", esc(`${(cs.gap_fraction * 100).toFixed(0)}% of sequences`))}
+      ${row("Percentile within the protein", esc(cs.percentile_within_protein))}${cs.note ? row("Note", esc(cs.note)) : ""}</table>` : na},
+    {label: "Details", html: `<h3>Numbering</h3><table>${row("Mtb (WHO / H37Rv)", esc(n.mtb_label))}${row("UniProt", n.uniprot ? esc(n.uniprot.accession + " " + n.uniprot.pos) : null)}
+      ${row("Structure residue", st ? esc(`${st.source} ${st.id}${st.chain ? " chain " + st.chain : ""}, residue ${st.auth_resnum ?? "-"}`) : null)}${n.ecoli ? row("E. coli", esc(n.ecoli.aa + n.ecoli.pos)) : ""}</table>
+      ${p ? `<h3>Property change</h3><table>${row("Charge", esc(`${p.charge_change >= 0 ? "+" : ""}${p.charge_change}`))}${row("Volume", esc(`${p.volume_change >= 0 ? "+" : ""}${p.volume_change} Å³`))}${row("Hydrophobicity", esc(`${p.hydrophobicity_change >= 0 ? "+" : ""}${p.hydrophobicity_change}`))}</table>` : ""}
+      ${callBlock(c.call, c.call_note)}${pointsBlock(c)}`}];
 }
-function renderCard(c) {
-  let body = "";
-  if (c.state === "missense") body = missenseBody(c.evidence, c);
-  else if (c.state === "truncation") {
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+
+function otherTabs(c) {                    // truncation and large deletion: a short overview, then the rest
+  let ov = "";
+  if (c.state === "truncation") {
     const t = c.truncation, l = c.lof_tolerance;
-    body = `<table>${row("Protein length", t.protein_length)}${row("First residue lost / altered", t.first_residue_lost)}${row("% protein lost", t.percent_protein_lost)}
-      ${row("Domains affected", (t.pfam_domains_affected || []).map(x => esc(`${x.name} (${x.effect})`)).join("<br>") || (t.pfam_note ? esc(t.pfam_note) : null))}
-      ${t.catalytic_site ? row("Catalytic site", esc(`${t.catalytic_site.definition}; lost: ${t.catalytic_site.residues_lost.join(", ") || "none"}`)) : ""}
-      ${row("Loss-of-function tolerance", esc(`${l.label} (TnSeq ${l.tnseq_call || "n/a"}). ${l.source}`))}</table><p class="muted">${esc(t.note || "")}</p>`;
+    ov = `<div class="stats">${tile("Protein lost", `${t.percent_protein_lost}%`, `from residue ${t.first_residue_lost} of ${t.protein_length}`)}
+      ${tile("Catalytic site", t.catalytic_site ? `${t.catalytic_site.residues_lost.length} of ${t.catalytic_site.residues.length} lost` : "none defined", t.catalytic_site ? t.catalytic_site.definition : "")}
+      ${tile("Loss-of-function tolerance", cap(l.label), `TnSeq ${l.tnseq_call || "n/a"}`)}</div>
+      ${(t.pfam_domains_affected || []).length ? `<p class="muted">Domains affected: ${t.pfam_domains_affected.map(x => esc(`${x.name} (${x.effect})`)).join("; ")}.</p>` : ""}`;
   } else if (c.state === "large_deletion") {
-    const dl = c.deletion;
-    body = `<table>${row("Coordinates", esc(`${dl.start}–${dl.end} (${dl.size_bp} bp)`))}</table><div class="tbl-wrap"><table class="grid"><tr><th>Gene</th><th>Fraction lost</th><th>Loss-of-function tolerance</th></tr>
-      ${dl.genes.map(g => `<tr><td>${esc(g.gene)}</td><td>${esc(g.fraction_of_gene_deleted)}</td><td>${esc(g.lof_tolerance ? g.lof_tolerance.label : "")}</td></tr>`).join("")}</table></div>`;
-  } else if (c.reason) body = `<p>${esc(c.reason)}</p>`;
-  if (c.state === "tier2_on_demand" || c.state === "not_built") {
-    const v = c.variant || {};
-    body += `<p><button class="small" data-explain='${esc(JSON.stringify({pos: v.pos, ref: v.ref, alt: v.alt}))}'>Build the evidence for this variant</button></p>`;
+    const dl = c.deletion, hit = dl.genes.filter(g => (g.fraction_deleted ?? g.fraction_of_gene_deleted) >= 0.99).length;
+    ov = `<div class="stats">${tile("Size", `${dl.size_bp.toLocaleString()} bp`, `${dl.start}–${dl.end}`)}
+      ${tile("Genes affected", String(dl.genes.length), `${hit} deleted completely`)}</div>
+      <div class="tbl-wrap"><table class="grid"><tr><th>Gene</th><th>Fraction lost</th><th>Loss-of-function tolerance</th></tr>
+      ${dl.genes.map(g => `<tr><td>${esc(g.gene)}</td><td>${esc(g.fraction_deleted ?? g.fraction_of_gene_deleted)}</td><td>${esc(g.lof_tolerance ? g.lof_tolerance.label : "")}</td></tr>`).join("")}</table></div>`;
+  } else ov = c.reason ? `<p>${esc(c.reason)}</p>` : "";
+  return [{label: "Overview", html: `${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${ov}`},
+          {label: "Details", html: `${callBlock(c.call, c.call_note)}${pointsBlock(c)}`}];
+}
+
+function renderCard(c, open) {
+  const list = c.state === "missense" ? missenseTabs(c) : (["truncation", "large_deletion"].includes(c.state) ? otherTabs(c) : null);
+  const kind = {truncation: "Truncation", large_deletion: "Large deletion", fail_low_coverage: "Fail, low coverage"}[c.state];
+  let body;
+  if (list) body = tabs("t" + (tabSeq++), list);
+  else {
+    body = `${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${c.reason ? `<p>${esc(c.reason)}</p>` : ""}`;
+    if (c.state === "tier2_on_demand" || c.state === "not_built") {
+      const v = c.variant || {};
+      body += `<p><button class="small" data-explain='${esc(JSON.stringify({pos: v.pos, ref: v.ref, alt: v.alt}))}'>Build the evidence for this variant</button></p>`;
+    }
+    body += callBlock(c.call, c.call_note) + pointsBlock(c);
   }
-  const mol = c.state === "missense" && c.evidence.numbering.structure && c.evidence.numbering.structure.source === "PDB"
-    ? `<button class="ghost small" data-mol='${esc(JSON.stringify(c.evidence.numbering.structure))}'>3D view</button><div class="viewer-slot"></div>` : "";
-  const chip = c.state === "no_evidence" ? "na" : c.state === "fail_low_coverage" ? "Fail" : "";
-  return `<details class="cardx"><summary><b>${esc(c.title)}</b><span class="chip ${chip}">${esc(c.state.replace(/_/g, " "))}</span>
-      <span class="chip">${c.tier ? "Tier " + c.tier : ""}</span><span class="muted">${(c.evidence_points || []).length} evidence points</span></summary>
-    <div class="body">${whoBlock(c.who_catalogue)}${c.synthesis ? `<p class="synthesis">${esc(c.synthesis)}</p>` : ""}${mol}${body}
-    <h3>Evidence points shown</h3><div class="pts">${(c.evidence_points || []).map(k => `<span class="chip">${esc(pt(k))}</span>`).join("")}</div>
-    ${callBlock(c.call, c.call_note)}<p class="disc">${esc(c.disclaimer || "")}</p></div></details>`;
+  return `<details class="cardx" ${open ? "open" : ""}><summary><span class="ttl">${esc(c.title)}</span>${whoChips(c.who_catalogue)}
+      ${kind ? `<span class="chip ${c.state === "fail_low_coverage" ? "serious" : ""}">${kind}</span>` : ""}
+      <span class="muted n">${c.tier ? "Tier " + c.tier + " · " : ""}${(c.evidence_points || []).length} points</span></summary>
+    <div class="body">${body}</div></details>`;
+}
+
+// ---- the stage-8 panel: key findings first, then two compact groups
+function renderEvidence(d) {
+  const KEY = ["missense", "truncation", "large_deletion", "fail_low_coverage"];
+  const key = d.cards.filter(c => KEY.includes(c.state)).sort((a, b) => rankOf(a) - rankOf(b) || a.title.localeCompare(b.title));
+  const pending = d.cards.filter(c => ["tier2_on_demand", "not_built", "preparing"].includes(c.state)).sort((a, b) => rankOf(a) - rankOf(b));
+  const none = d.cards.filter(c => c.state === "no_evidence");
+  const assoc = key.filter(c => rankOf(c) <= 1).length;
+  // no-evidence items grouped by why, so 38 near-identical cards become a handful of lines
+  const groups = {};
+  none.forEach(c => { const head = (c.reason || "No evidence available").split(":")[0];
+    (groups[head] = groups[head] || {reason: c.reason, names: []}).names.push((c.title || "").split(":")[0]); });
+  return `<p class="lead">For each finding: where the variant sits in the protein, how close it is to the drug, how conserved the
+      residue is and how different the new residue is. The WHO catalogue call is shown as published and is never changed by this evidence.</p>
+    <div class="stats">${tile("Findings with evidence", String(key.length))}${tile("Associated with resistance", String(assoc), "WHO group 1–2")}
+      ${tile("Awaiting evidence", String(pending.length), "built on request")}${tile("Not applicable", String(none.length), "no protein effect")}</div>
+    <h3>Key findings</h3>
+    <div id="cards">${key.map((c, i) => renderCard(c, i === 0 && rankOf(c) <= 1)).join("") || `<p class="muted">No variant in a catalogue gene needed evidence.</p>`}</div>
+    ${pending.length ? `<h3>Other variants in catalogue genes</h3>
+      <p class="muted">Genes without a precomputed structural model. Evidence is built from the AlphaFold model and homologs when you ask for it.</p>
+      <div class="tbl-wrap"><table class="grid"><tr><th>Variant</th><th>WHO catalogue</th><th></th></tr>
+      ${pending.map(c => { const v = c.variant || {};
+        return `<tr><td>${esc(c.title)}</td><td>${whoChips(c.who_catalogue)}</td><td><button class="small ghost" data-explain='${esc(JSON.stringify({pos: v.pos, ref: v.ref, alt: v.alt}))}'>Build evidence</button></td></tr>
+        <tr><td colspan="3" class="xrow"></td></tr>`; }).join("")}</table></div>` : ""}
+    ${none.length ? `<h3>Where structural evidence does not apply</h3>
+      ${Object.entries(groups).map(([head, g]) => `<details class="grp"><summary>${esc(head)} <span class="chip">${g.names.length}</span></summary>
+        <p class="muted">${esc(g.reason || "")}</p><p class="names">${g.names.map(n => `<code>${esc(n)}</code>`).join(" ")}</p></details>`).join("")}` : ""}
+    <details class="grp"><summary>How to read this</summary><ul class="muted">${d.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></details>`;
 }
 function wireCards(root) {
   wireCharts(root);
+  root.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+    const [grp] = t.dataset.tab.split("-").slice(0, 1), id = t.dataset.tab, scope = t.closest(".body") || root;
+    scope.querySelectorAll(`.tab[data-tab^="${grp}-"]`).forEach(x => x.setAttribute("aria-selected", x === t));
+    scope.querySelectorAll(`.tabpanel[data-panel^="${grp}-"]`).forEach(x => x.hidden = x.dataset.panel !== id);
+  });
   root.querySelectorAll("[data-mol]").forEach(b => b.onclick = () => openMol(b));
   root.querySelectorAll("[data-explain]").forEach(b => b.onclick = () => explainInto(b, JSON.parse(b.dataset.explain)));
 }

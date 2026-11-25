@@ -214,3 +214,25 @@ details>summary{cursor:pointer}
   *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
   .card:hover,.sample:hover,.combo:hover,.step:hover,button:hover{transform:none!important}
 }
+
+/* ---- evidence cards: ranked, tabbed, compact ---- */
+.cardx>summary .ttl{font-weight:650;font-size:15px}
+.cardx>summary .n{margin-left:auto;font-size:12.5px;white-space:nowrap}
+.cardx>summary .chip{font-size:12px}
+.stat.sm{padding:10px 12px}
+.stat.sm .v{font-size:18px;line-height:1.2;margin:2px 0}
+.stat.sm .k:first-child{text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:var(--accent)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin:14px 0 14px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+button.tab{background:transparent;box-shadow:none;color:var(--ink-2);border-radius:8px 8px 0 0;padding:8px 15px;
+  font-weight:550;border-bottom:2px solid transparent;white-space:nowrap;transition:color .18s,border-color .18s,background .18s}
+button.tab:hover:not(:disabled){background:rgba(34,211,238,.07);transform:none;box-shadow:none;filter:none;color:var(--ink)}
+button.tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+.tabpanel[hidden]{display:none}
+.tabpanel h3:first-child{margin-top:6px}
+.grp{border:1px solid var(--border);border-radius:11px;margin:9px 0;background:rgba(10,16,26,.42)}
+.grp>summary{padding:11px 15px;display:flex;gap:10px;align-items:center;font-size:14px}
+.grp>p,.grp>ul{margin:0;padding:0 16px 13px}
+.grp>ul{padding-left:34px}
+.names{display:flex;flex-wrap:wrap;gap:6px}
+.names code{background:rgba(10,16,26,.55);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:12px}
+td.xrow{padding:0;border:0}
