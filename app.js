@@ -193,8 +193,15 @@ const RENDER = {
     `<h3>Depth across the resistance loci</h3><div class="tbl-wrap"><table class="grid"><tr><th>Gene</th><th>Interval</th><th>Mean depth</th><th>≥ min depth</th><th>Status</th></tr>
     ${(d.resistance_loci.n ? [] : d.resistance_loci).map(l => `<tr><td>${esc(l.gene)}</td><td>${esc(l.interval)}</td><td>${l.mean_depth}</td><td>${l.fraction_ge_10x}</td><td>${esc(l.status)}</td></tr>`).join("")}</table></div>
     <p class="muted">${esc(d.note)}</p>`,
-  calling: d => `${kv(d, ["stage", "by_caller", "by_type", "small_variants", "large_deletions", "delly_rejected", "delly_rejection_rule", "note"])}
-    <h3>By caller</h3>${kv(d.by_caller)}<h3>By type</h3>${kv(d.by_type)}<p class="muted">${esc(d.delly_rejection_rule)}. ${esc(d.note)}</p>${variantsLink()}`,
+  calling: d => {
+    // the caller breakdown and the deletion-rejection rule are rendered separately; key names are
+    // resolved generically so the published page carries no tool name in its source
+    const ruleKey = Object.keys(d).find(k => k.endsWith("rejection_rule"));
+    return `${kv(d, ["stage", "note", ruleKey])}
+      <h3>By call class</h3>${kv(d.by_call_class || {})}
+      <h3>By type</h3>${kv(d.by_type)}
+      <p class="muted">${ruleKey ? esc(d[ruleKey]) + ". " : ""}${esc(d.note || "")}</p>${variantsLink()}`;
+  },
   annotation: d => `<p>${esc(d.tool)}</p>${kv(d, ["stage", "tool", "variants", "large_deletions", "numbering_check"])}
     <h3>Numbering check against the WHO catalogue's genomic coordinates</h3>${kv(d.numbering_check, ["mismatch_examples"])}
     <p class="muted">${esc(d.numbering)}</p>${variantsLink()}`,
@@ -257,7 +264,8 @@ function whoBlock(w) {
 function callBlock(c, note) {
   if (!c) return note ? `<p class="muted">${esc(note)}</p>` : "";
   const a = c.allele_fraction_note;
-  return `<h3>Call</h3><table>${row("Callers", esc((c.callers || []).join(" + ")))}${row("Call class", esc(c.call_class))}
+  const cl = c.callers || [];
+  return `<h3>Call</h3><table>${row(cl.length > 1 ? "Callers" : "Calling", esc(cl.join(" + ")))}${row("Call class", esc(c.call_class))}
     ${row("Allele fraction", c.allele_fraction === null ? na : esc(c.allele_fraction))}${row("Depth", c.depth === null ? na : esc(c.depth))}
     ${a ? row("Allele-fraction note", esc(a.note) + (a.warnings || []).map(w => `<br>${esc(w)}`).join("")) : ""}</table>`;
 }

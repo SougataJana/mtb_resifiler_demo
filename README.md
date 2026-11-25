@@ -20,7 +20,7 @@ pipeline. For each isolate you can step through what every stage produced:
 | 2 QC and species / contamination check | fastp, Mash screen |
 | 3 Trimming | fastp |
 | 4 Alignment and coverage | BWA-MEM, samtools markdup, mosdepth |
-| 5 Variant calling | GATK HaplotypeCaller + LoFreq + Delly, merged with per-call provenance |
+| 5 Variant calling | ResiFiler integrated calling (method withheld, see below) |
 | 6 Annotation and numbering | SnpEff, checked against the WHO catalogue's genomic coordinates |
 | 7 WHO catalogue v2 lookup per drug | loss-of-function and deletion rules; low coverage reports Fail, never susceptible |
 | 8 Explainability | structure, drug-binding distance, conservation, loss-of-function tolerance |
@@ -48,6 +48,13 @@ any deviation is printed at the top of the report. One preset (`Standard`) ships
 
 Expected genotypes come from the CRyPTIC consortium (release_june2022) and are used only as an
 external reference, never for tuning.
+
+## What is withheld
+
+The variant-calling step is shown as a single integrated component and **no variant caller is named**.
+The orchestration is unpublished work. Everything else is shown as the pipeline produced it: each
+variant still carries its call class (majority, sub-clonal, or depth-confirmed), because that is what
+the evidence layer uses to report a possible mixed population, and the WHO catalogue call is unchanged.
 
 ## What this page does not do
 
