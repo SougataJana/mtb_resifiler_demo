@@ -27,8 +27,7 @@ pipeline. For each isolate you can step through what every stage produced:
 
 **MIC prediction (machine learning) is in development** and is not part of this run.
 
-**The resistance call always comes from the WHO catalogue v2. The evidence layer is additive and
-never changes the call.**
+**The resistance call always comes from the WHO catalogue v2.**
 
 ### Tool chain, not a tool menu
 
