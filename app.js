@@ -92,6 +92,7 @@ async function api(path, opt) {
 }
 
 let chosen = null;        // {kind:"sample"|"file", id, inputType, label}
+let advMode = false;
 let comboKey = null;
 
 const GLYPH = {critical: "▲", warning: "◆", serious: "■", good: "✓", info: "●"};
@@ -259,7 +260,12 @@ function renderCombos() {
         : "Not applicable to this input"}</small></button>`;
   }).join("");
   document.querySelectorAll("[data-combo]").forEach(b => b.onclick = () => { comboKey = b.dataset.combo; renderCombos(); });
-  $("#chainWrap").innerHTML = comboKey ? toolPanel(comboKey === "fastq" ? "fastq_paired" : "fasta_assembly", true) : "";
+  const it = comboKey === "fastq" ? "fastq_paired" : "fasta_assembly";
+  $("#chainWrap").innerHTML = !comboKey ? "" : `<div class="tools modeswitch">
+      <button class="${advMode ? "ghost" : ""} small" data-mode="std">Standard (recommended)</button>
+      <button class="${advMode ? "" : "ghost"} small" data-mode="adv">Advanced (all stages)</button></div>`
+    + (advMode ? advancedPanel(it) : toolPanel(it, true));
+  document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { advMode = b.dataset.mode === "adv"; renderCombos(); });
   setState("s2", comboKey ? "selected" : "waiting", comboKey ? "good" : "");
 }
 function afterInput() {
@@ -382,18 +388,18 @@ const RENDER = {
     <h3>WHO catalogue calls per drug</h3><div id="rdrugs"></div>
     <h3>Variants</h3><div id="rvars"></div>`
 };
+const STAGE_NAMES = {species: "Species and contamination check", qc: "Read QC", trim: "Trimming",
+  align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)", markdup: "Duplicate marking",
+  coverage: "Coverage", call_majority: "Calling: majority alleles", call_lowfreq: "Calling: low-frequency alleles",
+  call_largedel: "Calling: large deletions", annotate: "Annotation and numbering"};
+
 function toolPanel(inputType, brief) {
   const combs = cfg.tool_combinations;
   if (!combs) return "";
   const key = (inputType || "").startsWith("fastq") ? "fastq" : "fasta";
   const c = combs[key];
   if (!c) return "";
-  const names = {species: "Species and contamination check", qc: "Read QC", trim: "Trimming",
-    align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)", markdup: "Duplicate marking",
-    coverage: "Coverage", call_majority: "Calling: majority alleles", call_lowfreq: "Calling: low-frequency alleles",
-    call_largedel: "Calling: large deletions", annotate: "Annotation and numbering"};
   const other = combs[key === "fastq" ? "fasta" : "fastq"];
-  // inside step 2 the chooser has already made the argument; don't repeat it
   return `${brief ? `<h3>What runs, and why each tool</h3>` : `<h3>Tool combination: ${esc(c.label)}</h3>
     <p class="muted">Tools are not picked one stage at a time. A combination is validated <b>as a whole</b> and was run
     end to end on the test data together, because a chain that looks reasonable at each step can still be wrong overall:
@@ -401,11 +407,38 @@ function toolPanel(inputType, brief) {
     validated set stops the run with an explicit error rather than producing results, and any deviation is printed at the
     top of the report. Preset in use: <b>${esc(cfg.preset)}</b>.</p>
     <p>${esc(c.note)}</p>`}
-    <ol class="chain">${c.stages.map(k => `<li><b>${esc(names[k] || k)}</b> <code>${esc(cfg.tools[k])}</code>
-      <p class="muted">${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>
+    <ol class="chain">${c.stages.map(k => `<li><span class="t">${esc(STAGE_NAMES[k] || k)}</span><code>${esc(cfg.tools[k])}</code>
+      <p>${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>
     ${other && !brief ? `<p class="muted">The other combination, <b>${esc(other.label)}</b>, is selected automatically
       when that kind of input is uploaded. ${esc(other.note)}</p>` : ""}`;
 }
+
+// Advanced view: every stage as a real menu. Only a tool whose whole chain has been run end to end is
+// selectable; every other option stays disabled and says why, so a selection can never be quietly
+// swapped for something else at run time.
+function advancedPanel(inputType) {
+  const key = (inputType || "").startsWith("fastq") ? "fastq" : "fasta";
+  const c = (cfg.tool_combinations || {})[key];
+  if (!c) return "";
+  const alts = cfg.tool_alternatives || {}, allowed = cfg.allowed_tools || {};
+  const rows = c.stages.map(k => {
+    const inUse = cfg.tools[k], ok = allowed[k] || [inUse];
+    const opts = ok.map(t => `<option selected>${esc(t)}</option>`).join("")
+      + (alts[k] || []).map(a => `<option disabled>${esc(a.tool)} — not in this build</option>`).join("");
+    return `<div class="advrow">
+      <label><span class="k">${esc(STAGE_NAMES[k] || k)}</span>
+        <select aria-label="${esc(STAGE_NAMES[k] || k)}">${opts}</select></label>
+      <p class="muted">${esc((cfg.tool_rationale || {})[k] || "")}</p>
+      ${(alts[k] || []).map(a => `<p class="alt"><b>${esc(a.tool)}</b> ${esc(a.why)}</p>`).join("")}
+    </div>`;
+  }).join("");
+  return `<p class="muted">Every stage is listed with the alternatives you might expect. A tool is selectable only
+    where the whole chain containing it has been run end to end on the test data; the rest are disabled and say why.
+    <b>Nothing is silently substituted</b>: an untested selection stops the run with an explicit error, so a report can
+    never name one tool and have been produced by another.</p>
+    <div class="advgrid">${rows}</div>`;
+}
+
 const variantsLink = () => `<p><button class="ghost small" data-go="report">Open the full variant table in the report</button></p>`;
 function wireVariantsLink() { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => showStage(b.dataset.go)); }
 function wireWho() {}
