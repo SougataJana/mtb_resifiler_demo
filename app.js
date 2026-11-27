@@ -88,7 +88,6 @@ const STAGE_NAMES = {qc: "Read QC", trim: "Trimming",
   mutation_db: "Mutation database", reference: "Reference genome", visualization: "Visualisation"};
 const TOOL_LABEL = {who_catalogue_v2: "WHO catalogue v2", h37rv_nc_000962_3: "H37Rv", builtin_charts: "built-in charts"};
 const toolLabel = t => TOOL_LABEL[t] || t;
-const PLAIN_OPTIONS = ["FastQC", "Trimmomatic", "samtools depth"];   // menu entries shown without a suffix
 const comboFor = t => (t || "").startsWith("fastq") ? "fastq" : t ? "fasta" : "fastq";
 
 function renderConfig() {
@@ -106,7 +105,7 @@ function renderConfig() {
   document.querySelectorAll("#chainWrap select[data-stage]").forEach(sel => sel.onchange = () => { selection[sel.dataset.stage] = sel.value; renderConfig(); });
   const rs = $("#resetStd"); if (rs) rs.onclick = () => { selection = {}; renderConfig(); };
   const bad = invalidSelections();
-  setState("s1", bad.length ? "Blocked: not validated" : (advMode ? "Advanced view" : c ? "Standard" : "waiting"), bad.length ? "warning" : (c ? (advMode ? "info" : "good") : ""));
+  setState("s1", bad.length ? "Option not enabled" : (advMode ? "Advanced view" : c ? "Standard" : "waiting"), bad.length ? "warning" : (c ? (advMode ? "info" : "good") : ""));
   updateRun();
 }
 function chainPanel(c) {
@@ -127,18 +126,16 @@ function invalidSelections() {
 }
 function advancedPanel(c) {
   const alts = cfg.tool_alternatives || {}, allowed = cfg.allowed_tools || {}, lockedSt = cfg.locked_stages || [], bad = invalidSelections();
-  return `${bad.length ? `<div class="who guard" role="alert"><p>${chip("Not validated", "warning")} <b>${bad.length} selected tool${bad.length > 1 ? "s are" : " is"} not validated in this build</b>:
-      ${bad.map(x => esc(`${STAGE_NAMES[x.k] || x.k}: ${x.tool}`)).join("; ")}.</p>
-      <p class="muted">Start is blocked, because the run would not use the tool you picked and the report would say it did. Nothing is substituted silently.
+  return `${bad.length ? `<div class="who guard" role="alert"><p><b>Not enabled in this version:</b>
+      ${bad.map(x => esc(`${STAGE_NAMES[x.k] || x.k}: ${x.tool}`)).join("; ")}.
       <button class="small ghost" id="resetStd">Reset to Standard</button></p></div>` : ""}
-    <p class="muted">Every option is available. Only validated tools run in this build: a tool is validated when the whole chain containing it has been run end to end on the test data.
-    Any other choice is flagged and blocks the run until you switch back or that tool has been validated.</p>
+    <p class="muted">The sample output uses the Standard tools. The other options are not enabled in this version.</p>
     <div class="advgrid">${c.stages.map(k => {
       const ok = allowed[k] || [cfg.tools[k]], locked = lockedSt.includes(k), cur = selection[k] || ok[0];
       const alt = (alts[k] || []).find(a => a.tool === cur);
       const opts = ok.map(t => `<option value="${esc(t)}" ${t === cur ? "selected" : ""}>${esc(toolLabel(t))}</option>`).join("")
-        + (alts[k] || []).map(a => `<option value="${esc(a.tool)}" ${a.tool === cur ? "selected" : ""}>${esc(a.tool)}${PLAIN_OPTIONS.includes(a.tool) ? "" : " \u2014 not validated"}</option>`).join("");
-      return `<div class="advrow ${locked ? "locked" : ""} ${alt ? "flag" : ""}"><label><span class="k">${esc(STAGE_NAMES[k] || k)}${locked ? ` ${chip("fixed", "info")}` : ""}${alt ? ` ${chip("not validated", "warning")}` : ""}</span>
+        + (alts[k] || []).map(a => `<option value="${esc(a.tool)}" ${a.tool === cur ? "selected" : ""}>${esc(a.tool)}</option>`).join("");
+      return `<div class="advrow ${locked ? "locked" : ""} ${alt ? "flag" : ""}"><label><span class="k">${esc(STAGE_NAMES[k] || k)}${locked ? ` ${chip("fixed", "info")}` : ""}</span>
         <select data-stage="${esc(k)}" aria-label="${esc(STAGE_NAMES[k] || k)}" ${locked ? "disabled" : ""}>${opts}</select></label>
         <p class="muted">${esc(alt ? alt.why : ((cfg.tool_rationale || {})[k] || ""))}</p></div>`;
     }).join("")}</div>`;
@@ -229,9 +226,9 @@ $("#sampleOut").onclick = () => {
 function updateRun() {
   const bad = invalidSelections();
   $("#runBtn").disabled = DEMO || !chosen || bad.length > 0;
-  $("#runBtn").title = bad.length ? "Blocked: a selected tool is not validated in this build" : "";
+  $("#runBtn").title = bad.length ? "A selected tool is not enabled in this version" : "";
   const n = $("#runNote");
-  if (bad.length) n.textContent = "Start is blocked: " + bad.map(x => `${STAGE_NAMES[x.k] || x.k} \u2192 ${x.tool}`).join("; ") + " is not validated in this build. Reset to Standard in step 1.";
+  if (bad.length) n.textContent = "Start is blocked: " + bad.map(x => `${STAGE_NAMES[x.k] || x.k} \u2192 ${x.tool}`).join("; ") + " is not enabled in this version. Reset to Standard in step 1.";
   else n.textContent = DEMO
     ? "Running the pipeline needs the analysis server: alignment, calling and annotation run in containers, and this page is served as static files. It shows one stored sample output instead."
     : "The run takes several minutes; each step's output appears in its tab as the step finishes.";
