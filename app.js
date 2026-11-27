@@ -82,12 +82,13 @@ const stageOf = async (key) => {
 })().catch(e => { $("#banner").textContent = "Could not load: " + e.message; });
 
 // ------------------------------------------------------------------ 1. Pipeline Configuration
-const STAGE_NAMES = {species: "Species and contamination check", qc: "Read QC", trim: "Trimming",
+const STAGE_NAMES = {qc: "Read QC", trim: "Trimming",
   align_reads: "Alignment (reads)", align_assembly: "Alignment (assembly)", markdup: "Duplicate marking",
-  coverage: "Coverage", calling: "Variant calling", annotate: "Annotation and numbering",
+  coverage: "Coverage", calling: "Variant calling", annotate: "Annotation",
   mutation_db: "Mutation database", reference: "Reference genome", visualization: "Visualisation"};
-const TOOL_LABEL = {who_catalogue_v2: "WHO catalogue v2", h37rv_nc_000962_3: "H37Rv NC_000962.3", builtin_charts: "built-in charts"};
+const TOOL_LABEL = {who_catalogue_v2: "WHO catalogue v2", h37rv_nc_000962_3: "H37Rv", builtin_charts: "built-in charts"};
 const toolLabel = t => TOOL_LABEL[t] || t;
+const PLAIN_OPTIONS = ["FastQC", "Trimmomatic", "samtools depth"];   // menu entries shown without a suffix
 const comboFor = t => (t || "").startsWith("fastq") ? "fastq" : t ? "fasta" : "fastq";
 
 function renderConfig() {
@@ -110,7 +111,7 @@ function renderConfig() {
 }
 function chainPanel(c) {
   return `<h3>What runs, and why each tool</h3><ol class="chain">${c.stages.map(k => `<li><span class="t">${esc(STAGE_NAMES[k] || k)}</span>
-    <code>${esc(toolLabel(cfg.tools[k]))}</code><p>${esc((cfg.tool_rationale || {})[k] || "")}</p></li>`).join("")}</ol>`;
+    <code>${esc(toolLabel(cfg.tools[k]))}</code>${(cfg.tool_rationale || {})[k] ? `<p>${esc(cfg.tool_rationale[k])}</p>` : ""}</li>`).join("")}</ol>`;
 }
 // Advanced: every stage is a real menu and every option is selectable. Only a tool whose whole chain has been run end
 // to end can actually run. Picking any other is allowed, but it is flagged, Start is blocked with the reason, and the
@@ -136,7 +137,7 @@ function advancedPanel(c) {
       const ok = allowed[k] || [cfg.tools[k]], locked = lockedSt.includes(k), cur = selection[k] || ok[0];
       const alt = (alts[k] || []).find(a => a.tool === cur);
       const opts = ok.map(t => `<option value="${esc(t)}" ${t === cur ? "selected" : ""}>${esc(toolLabel(t))}</option>`).join("")
-        + (alts[k] || []).map(a => `<option value="${esc(a.tool)}" ${a.tool === cur ? "selected" : ""}>${esc(a.tool)} \u2014 not validated</option>`).join("");
+        + (alts[k] || []).map(a => `<option value="${esc(a.tool)}" ${a.tool === cur ? "selected" : ""}>${esc(a.tool)}${PLAIN_OPTIONS.includes(a.tool) ? "" : " \u2014 not validated"}</option>`).join("");
       return `<div class="advrow ${locked ? "locked" : ""} ${alt ? "flag" : ""}"><label><span class="k">${esc(STAGE_NAMES[k] || k)}${locked ? ` ${chip("fixed", "info")}` : ""}${alt ? ` ${chip("not validated", "warning")}` : ""}</span>
         <select data-stage="${esc(k)}" aria-label="${esc(STAGE_NAMES[k] || k)}" ${locked ? "disabled" : ""}>${opts}</select></label>
         <p class="muted">${esc(alt ? alt.why : ((cfg.tool_rationale || {})[k] || ""))}</p></div>`;
@@ -192,7 +193,7 @@ async function handleFiles(list) {
       ${tile("Format detected", r.label)}${r.records !== undefined ? tile(r.type === "fastq" ? "Reads in sample" : "Records", num(r.records)) : ""}
       ${r.readLen ? tile("Mean read length", r.readLen + " bp") : ""}${r.gc != null ? tile("GC content", r.gc + "%") : ""}${tile("Size", mb.toFixed(0) + " MB", files.length + " file" + (files.length > 1 ? "s" : ""))}</div>
       <p class="muted">Format, record structure, sequence alphabet and base composition were read from the first 256 KB, in this page. ${r.note ? esc(r.note) + " " : ""}The file was not uploaded anywhere.
-      ${r.gc != null && r.gc >= 60 && r.gc <= 70 ? "A GC content near 65% is consistent with <i>M. tuberculosis</i>; the species check itself runs in the pipeline." : ""}</p>`;
+      ${r.gc != null && r.gc >= 60 && r.gc <= 70 ? "A GC content near 65% is consistent with <i>M. tuberculosis</i>." : ""}</p>`;
     setState("s2", "validated", "good");
     renderConfig();
   } catch (e) {
@@ -321,14 +322,11 @@ const pre = t => `<pre>${esc(t)}</pre>`;
 const qcUrl = () => JOB.kind === "sample" ? "data/sample_qc.html" : `/api/jobs/${JOB.id}/qc.html`;
 
 function tabQC(d) {
-  const r = d.qc.raw, sp = d.species, q = d.qc;
+  const r = d.qc.raw, q = d.qc;
   return `<h3>QC results</h3>${info("QC step completed")}
     <div class="stats">${tile("Reads", num(r.reads))}${tile("Bases", human(r.bases))}${tile("Q20 bases", pct(r.q20_rate))}${tile("Q30 bases", pct(r.q30_rate))}
       ${tile("GC content", pct(r.gc_content))}${tile("Mean read length", r.mean_read_length + " bp")}${tile("Duplication", pct(q.duplication_rate))}${tile("Adapter detected", q.adapter_detected ? "yes" : "no")}</div>
     ${(q.flags || []).length ? `<p class="msg">${q.flags.map(esc).join("; ")}</p>` : `<p class="muted">No QC flag raised. Thresholds are provisional placeholders.</p>`}
-    <h3>Species and contamination check</h3>
-    <p>${chip(sp.is_mtbc ? "MTBC detected" : "Not recognised as MTBC", sp.is_mtbc ? "good" : "critical")} ${esc(sp.verdict)}</p>
-    <div class="stats">${tile("MTBC containment", pct(sp.mtbc_identity, 2))}${tile("Contamination flag", (sp.possible_contamination || []).length ? "possible" : "none")}</div>
     <details class="grp"><summary>View the read QC report (fastp)</summary><div class="inner"><p class="muted">The report loads its charts from the internet.</p>
       <iframe class="qcframe" src="${esc(qcUrl())}" title="fastp QC report" loading="lazy"></iframe></div></details>`;
 }
@@ -364,7 +362,7 @@ function tabBamProc(d) {
 function tabCall(d) {
   const t = d.by_type || {}, c = d.by_call_class || {};
   return `<h3>Variant calling results</h3>${info("Variant calling completed")}
-    <p class="muted">Calling is MTB-ResiFiler's own orchestrated caller: fixed, not selectable, method unpublished.</p>
+    <p class="muted">an orchestrated variant caller</p>
     <div class="stats">${tile("Variants called", num(d.n_small_variants))}${tile("SNVs", num(t.SNV))}${tile("Indels", num(t.indel))}${tile("Large deletions", num(d.n_large_deletions))}</div>
     <h3>By call class</h3><div class="stats">${Object.entries(c).map(([k, v]) => tile(k, num(v))).join("")}</div>
     <details class="grp"><summary>View VCF file preview</summary><div class="inner">${pre(d.vcf_preview)}<p class="muted">First 40 variants by position. ${esc(d.note || "")}</p></div></details>`;
@@ -372,13 +370,12 @@ function tabCall(d) {
 function tabAnn(d) {
   const eff = Object.entries(d.by_effect || {}).slice(0, 10), nc = d.numbering_check || {};
   return `<h3>Step 7: Annotate variants</h3>${info("Annotation completed")}
-    <div class="stats">${tile("Variants annotated", num(d.n_variants))}${tile("In catalogue genes", num(d.n_in_catalogue_genes))}${tile("Numbering check", `${nc.matches}/${nc.variants_checked}`, "match WHO coordinates")}${tile("Tool", d.tool && d.tool.split(",")[0])}</div>
-    <p class="muted">${esc(d.numbering || "")}</p>
+    <div class="stats">${tile("Variants annotated", num(d.n_variants))}${tile("In catalogue genes", num(d.n_in_catalogue_genes), "coding and non-coding")}${tile("Numbering check", `${nc.matches}/${nc.variants_checked}`, "match WHO coordinates")}${tile("Tool", d.tool && d.tool.split(",")[0])}</div>
     <h3>Annotation summary</h3>${barChart(eff, "Variants by predicted effect")}
     <h3>Gene annotation table</h3>
     <details class="grp"><summary>View gene-level statistics</summary><div class="inner"><div class="tbl-wrap scroll"><table class="grid"><tr><th>Gene</th><th>Variants</th></tr>
       ${(d.top_genes || []).map(([g, n]) => `<tr><td>${esc(g)}</td><td>${n}</td></tr>`).join("")}</table></div></div></details>
-    <details class="grp" open><summary>Variants in WHO catalogue genes (${(d.catalogue_gene_variants || []).length})</summary><div class="inner"><div class="tbl-wrap scroll"><table class="grid">
+    <details class="grp" open><summary>Coding variants in WHO catalogue genes (${(d.catalogue_gene_variants || []).length})</summary><div class="inner"><div class="tbl-wrap scroll"><table class="grid">
       <tr><th>Gene</th><th>Change</th><th>Effect</th><th>Allele fraction</th></tr>
       ${(d.catalogue_gene_variants || []).map(v => `<tr><td>${esc(v.gene)}</td><td>${esc(v.hgvs_p || v.hgvs_c)}</td><td>${esc(v.effect)}</td><td>${esc(v.allele_fraction)}</td></tr>`).join("")}</table></div></div></details>
     <h3>Download results</h3><div class="tools"><button data-dl="variants">Download annotated variants (TSV)</button></div>`;
@@ -386,7 +383,7 @@ function tabAnn(d) {
 function tabFilt(w, a) {
   const rows = w.profile || [], n = t => rows.filter(r => r.type === t).length, lin = w.lineage;
   return `<h3>Step 8: Variant filtering &amp; lineage classification</h3>
-    <p><b>Current pipeline mode:</b> WHO catalogue v2 (${esc(w.catalogue)}). ${chip("WHO catalogue v2 mode", "info")}</p>
+    <p><b>Current pipeline mode:</b> ${esc(w.catalogue)}. ${chip("WHO catalogue v2 mode", "info")}</p>
     ${info("Resistance profiling: done")}${lin ? info("Lineage: " + lin.result) : ""}
     <div class="stats">${tile("Fixed resistance", String(n("Fixed resistance")), "grade 1–2, AF ≥ " + Math.round(100 * w.fixed_af) + "%")}${tile("Heteroresistance", String(n("Heteroresistance")), "grade 1–2, below that")}
       ${tile("Uncertain (grade 3)", String(n("Uncertain significance (grade 3)")))}${tile("Not assessed", String(n("Not assessed")))}${tile("Fail (low coverage)", String(n("Fail (low coverage)")))}</div>
@@ -407,10 +404,10 @@ const TAB_RENDER = {qc: tabQC, trim: tabTrim, align: tabAlign, bamqc: tabBamQC, 
 const GROUP_ORDER = {};
 function profileTable(rows) {
   let g = "";
-  return `<div class="tbl-wrap"><table class="grid"><tr><th>Clinical group</th><th>Drug</th><th>Gene / mutation</th><th>Confidence</th><th>Genomic change</th><th>Frequency</th><th>Resistance type</th></tr>
+  return `<div class="tbl-wrap"><table class="grid"><tr><th>Clinical group</th><th>Drug</th><th>Gene / mutation</th><th>Confidence</th><th>Genomic change (NC_000962.3)</th><th>Frequency</th><th>Resistance type</th></tr>
     ${rows.map(r => { const first = r.group !== g; g = r.group;
       return `<tr class="${first ? "gstart" : ""}"><td>${first ? esc(r.group) : ""}</td><td>${esc(r.drug)}</td><td>${esc(r.mutation) || na}</td><td>${esc(r.confidence) || na}</td>
-        <td>${esc(r.change) || na}</td><td>${r.frequency === null ? na : r.frequency + "%"}</td><td>${typeChip(r.type)}</td></tr>`; }).join("")}</table></div>`;
+        <td>${esc((r.change || "").replace("NC_000962.3:", "")) || na}</td><td>${r.frequency === null ? na : r.frequency + "%"}</td><td>${typeChip(r.type)}</td></tr>`; }).join("")}</table></div>`;
 }
 async function tabReport() {
   const w = await stageOf("who"), rep = await stageOf("report"), ann = await stageOf("annotation").catch(() => null);

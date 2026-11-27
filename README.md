@@ -16,7 +16,7 @@ and **4 Active Job Manager**, with one tab per pipeline step, each showing that 
 
 | Tab | Output shown |
 |---|---|
-| 1 QC | read statistics, species and contamination check, the QC report |
+| 1 QC | read statistics, the QC report |
 | 2 Trimming | before/after statistics, reads removed, the trimming log |
 | 3 Alignment | aligner, mapping rate |
 | 4 BAM QC | depth, genome coverage, depth across the resistance loci |

@@ -258,7 +258,6 @@ select{font:inherit;color:var(--ink);background:rgba(10,16,26,.55);border:1px so
 
 /* tables keep whole words (the wrapper scrolls sideways if needed); only truly unbreakable tokens may break */
 td,th{overflow-wrap:break-word;word-break:normal;hyphens:none}
-table.grid td:nth-child(5){white-space:nowrap}      /* genomic change */
 .chip.neutral .g{color:var(--ink-2)}
 
 .advrow.flag{border-color:rgba(250,178,25,.55);box-shadow:inset 3px 0 0 var(--warning)}
@@ -270,3 +269,8 @@ table.grid td:nth-child(5){white-space:nowrap}      /* genomic change */
 .advrow{min-width:0}
 .advrow select{width:100%;max-width:100%;flex:1 1 180px}
 .combos,.samples,.stats,.stepper{min-width:0}
+
+/* the resistance profile has seven columns: tighter cells so the last one is never cut off */
+table.grid th,table.grid td{padding:7px 7px}
+table.grid th{font-size:11px;letter-spacing:.04em}
+table.grid .chip{white-space:normal;line-height:1.25}
